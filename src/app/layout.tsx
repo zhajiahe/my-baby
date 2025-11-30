@@ -14,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/30">
+      <body className="min-h-screen" style={{ background: 'var(--background)' }}>
         <ToastProvider>
           {children}
         </ToastProvider>

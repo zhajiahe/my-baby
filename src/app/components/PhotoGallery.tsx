@@ -481,51 +481,52 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="max-w-6xl mx-auto space-y-4 md:space-y-6">
+      {/* 页面标题 */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
-          <h2 className="text-3xl font-bold text-gray-800 mb-2">媒体墙</h2>
-          <p className="text-gray-600">记录宝宝成长的珍贵时刻</p>
+          <h2 className="text-xl md:text-3xl font-bold text-gray-800 mb-1">媒体墙</h2>
+          <p className="text-sm md:text-base text-gray-600">记录宝宝成长的珍贵时刻</p>
         </div>
         <button
           onClick={() => setShowUploadForm(true)}
-          className="btn-primary"
+          className="btn-primary text-sm md:text-base py-2 md:py-3"
         >
           上传媒体文件
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="card text-center">
-          <div className="text-3xl mb-2">📸</div>
-          <p className="text-sm text-gray-600 mb-1">总媒体数</p>
-          <p className="text-2xl font-bold text-blue-600">{mediaItems.length}</p>
+      {/* Stats - 移动端横向滚动或3列 */}
+      <div className="grid grid-cols-3 gap-2 md:gap-6">
+        <div className="card text-center p-3 md:p-6">
+          <div className="text-xl md:text-3xl mb-1 md:mb-2">📸</div>
+          <p className="text-xs md:text-sm text-gray-600 mb-0.5 md:mb-1">总媒体数</p>
+          <p className="text-lg md:text-2xl font-bold text-blue-600">{mediaItems.length}</p>
         </div>
 
-        <div className="card text-center">
-          <div className="text-3xl mb-2">📅</div>
-          <p className="text-sm text-gray-600 mb-1">最新媒体</p>
-          <p className="text-2xl font-bold text-green-600">
+        <div className="card text-center p-3 md:p-6">
+          <div className="text-xl md:text-3xl mb-1 md:mb-2">📅</div>
+          <p className="text-xs md:text-sm text-gray-600 mb-0.5 md:mb-1">最新</p>
+          <p className="text-sm md:text-2xl font-bold text-green-600 truncate">
             {mediaItems[0]?.date ? formatDateDisplay(mediaItems[0].date) : '暂无'}
           </p>
         </div>
 
-        <div className="card text-center">
-          <div className="text-3xl mb-2">🎂</div>
-          <p className="text-sm text-gray-600 mb-1">记录时长</p>
-          <p className="text-2xl font-bold text-teal-600">
-            {Object.keys(groupedMediaItems).length} 个月
+        <div className="card text-center p-3 md:p-6">
+          <div className="text-xl md:text-3xl mb-1 md:mb-2">🎂</div>
+          <p className="text-xs md:text-sm text-gray-600 mb-0.5 md:mb-1">时长</p>
+          <p className="text-lg md:text-2xl font-bold text-teal-600">
+            {Object.keys(groupedMediaItems).length}月
           </p>
         </div>
       </div>
 
       {/* Upload Form - 统一的多文件上传界面 */}
       {showUploadForm && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0, 0, 0, 0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 50 }}>
-          <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto shadow-2xl">
+        <div className="fixed inset-0 bg-black/50 flex items-end md:items-center justify-center z-50">
+          <div className="bg-white rounded-t-2xl md:rounded-xl w-full md:max-w-2xl p-4 md:p-6 max-h-[85vh] md:max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-800">上传媒体文件</h3>
+              <h3 className="text-lg md:text-xl font-bold text-gray-800">上传媒体文件</h3>
               <button
                 onClick={() => {
                   if (isUploading) return;
@@ -533,7 +534,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
                   setUploadFiles([]);
                   setUploadError(null);
                 }}
-                className="text-gray-400 hover:text-gray-600 text-2xl"
+                className="text-gray-400 hover:text-gray-600 text-2xl p-1"
                 disabled={isUploading}
               >
                 ×
@@ -920,7 +921,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
               <span className="ml-2 text-sm text-gray-500">({monthItems.length} 个媒体)</span>
             </h3>
             
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-4">
               {monthItems // Renamed from monthPhotos
                 .sort((a, b) => b.date.localeCompare(a.date))
                 .map((item) => ( // Renamed from photo to item

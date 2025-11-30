@@ -11,12 +11,22 @@
 :root {
   --background: #fafbfc;
   --foreground: #1a1a2e;
+  --card-bg: #ffffff;
+  --card-border: #f1f5f9;
+  --text-primary: #1f2937;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0f172a;
     --foreground: #f1f5f9;
+    --card-bg: #1e293b;
+    --card-border: #334155;
+    --text-primary: #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
   }
 }
 
@@ -26,18 +36,42 @@ body {
   font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
 }
 
+/* 移动端安全区域 */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* 移动端内容区域底部留白 */
+@media (max-width: 767px) {
+  .main-content {
+    padding-bottom: 5rem; /* 底部导航高度 + 额外间距 */
+  }
+}
+
 /* Component styles */
 .card {
-  background-color: white;
+  background-color: var(--card-bg);
   border-radius: 1rem;
   box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
   padding: 1.5rem;
-  border: 1px solid #f1f5f9;
+  border: 1px solid var(--card-border);
   transition: box-shadow 0.2s;
+}
+
+@media (prefers-color-scheme: dark) {
+  .card {
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3);
+  }
 }
 
 .card:hover {
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  .card:hover {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.4);
+  }
 }
 
 .btn-primary {
@@ -64,19 +98,18 @@ body {
 }
 
 .btn-secondary {
-  background-color: white;
-  color: #475569;
+  background-color: var(--card-bg);
+  color: var(--text-secondary);
   padding: 0.75rem 1.5rem;
   border-radius: 0.75rem;
   font-weight: 500;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--card-border);
   transition: all 0.2s;
 }
 
 .btn-secondary:hover {
-  background-color: #f8fafc;
-  border-color: #cbd5e1;
-  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  background-color: var(--card-border);
+  border-color: var(--text-muted);
 }
 
 .btn-secondary:active {
@@ -100,16 +133,21 @@ body {
 .input-field {
   width: 100%;
   padding: 0.75rem 1rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--card-border);
   border-radius: 0.75rem;
   outline: none;
   transition: all 0.2s;
-  background-color: white;
+  background-color: var(--card-bg);
+  color: var(--text-primary);
 }
 
 .input-field:focus {
   border-color: #14b8a6;
   box-shadow: 0 0 0 3px rgb(20 184 166 / 0.2);
+}
+
+.input-field::placeholder {
+  color: var(--text-muted);
 }
 
 .milestone-badge {
@@ -193,4 +231,54 @@ body {
 .stat-card:hover {
   border-color: #99f6e4;
   box-shadow: 0 4px 6px -1px rgb(20 184 166 / 0.05);
+}
+
+/* 导航栏样式 */
+.nav-bar {
+  background-color: var(--card-bg);
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+  color: var(--text-primary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .nav-bar {
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3);
+    border-bottom: 1px solid var(--card-border);
+  }
+}
+
+.nav-bar-bottom {
+  background-color: var(--card-bg);
+  border-top: 1px solid var(--card-border);
+}
+
+.nav-item-inactive {
+  color: var(--text-secondary);
+}
+
+.nav-item-inactive:hover {
+  background-color: var(--card-border);
+  color: var(--text-primary);
+}
+
+/* 暗黑模式下的文字颜色修复 */
+@media (prefers-color-scheme: dark) {
+  .text-gray-800 {
+    color: var(--text-primary);
+  }
+  
+  .text-gray-600, .text-gray-500 {
+    color: var(--text-secondary);
+  }
+  
+  .text-gray-400 {
+    color: var(--text-muted);
+  }
+  
+  /* 渐变背景在暗黑模式下的优化 */
+  .bg-gradient-to-br.from-teal-50,
+  .bg-gradient-to-br.from-slate-50,
+  .bg-gradient-to-br.from-cyan-50 {
+    background: var(--card-bg);
+  }
 }

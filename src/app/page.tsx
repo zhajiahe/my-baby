@@ -59,7 +59,7 @@ export default function Home() {
   return (
     <div className="min-h-screen">
       <Navigation activeTab={activeTab} setActiveTab={handleTabChange} />
-      <main className="container mx-auto px-4 py-8">
+      <main className="main-content container mx-auto px-3 md:px-4 py-4 md:py-8">
         {/* 使用CSS控制显示隐藏，避免组件重新挂载 */}
         <div className={activeTab === 'dashboard' ? 'block' : 'hidden'}>
           <Dashboard setActiveTab={handleTabChange} />

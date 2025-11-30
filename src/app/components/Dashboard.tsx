@@ -133,41 +133,38 @@ export default function Dashboard({ setActiveTab }: DashboardProps) {
   }
 
   return (
-    <div className="min-h-screen p-4 lg:p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="space-y-4 md:space-y-6">
+      <div className="max-w-7xl mx-auto">
         {/* 统一的顶部卡片网格 */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 lg:gap-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 md:gap-4 lg:gap-6">
           {/* 宝宝信息卡片 - 占据更多空间 */}
           <div className="col-span-2 md:col-span-3 lg:col-span-2">
-            <div className="card p-4 h-full bg-gradient-to-br from-teal-50 to-cyan-50 min-h-[60px] md:min-h-[80px] lg:min-h-[100px]">
-              <div className="flex items-center space-x-4 h-full">
-                <div className="w-20 h-20 flex-shrink-0">
+            <div className="card p-3 md:p-4 h-full bg-gradient-to-br from-teal-50 to-cyan-50">
+              <div className="flex items-center gap-3 md:gap-4 h-full">
+                <div className="w-14 h-14 md:w-20 md:h-20 flex-shrink-0">
                   {baby.avatar ? (
                     <Image
                       src={baby.avatar}
                       alt="宝宝头像"
                       width={80}
                       height={80}
-                      className="w-20 h-20 rounded-full object-cover"
+                      className="w-14 h-14 md:w-20 md:h-20 rounded-full object-cover"
                     />
                   ) : (
-                    <div className="w-20 h-20 bg-gradient-to-br from-teal-400 to-teal-600 rounded-full flex items-center justify-center text-white text-3xl">
+                    <div className="w-14 h-14 md:w-20 md:h-20 bg-gradient-to-br from-teal-400 to-teal-600 rounded-full flex items-center justify-center text-white text-2xl md:text-3xl">
                       {baby.gender === 'boy' ? '👦' : '👧'}
                     </div>
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h1 className="text-xl font-bold text-gray-800 truncate mb-1">{baby.name}</h1>
-                  <p className="text-gray-600 text-base mb-1">{currentAge}</p>
-                  <p className="text-sm text-teal-600 font-medium mb-2">
+                  <h1 className="text-base md:text-xl font-bold text-gray-800 truncate mb-0.5">{baby.name}</h1>
+                  <p className="text-gray-600 text-sm md:text-base mb-0.5">{currentAge}</p>
+                  <p className="text-xs md:text-sm text-teal-600 font-medium mb-1 md:mb-2">
                     已经 {currentDays} 天了 ✨
                   </p>
-                  {/* <p className="text-sm text-gray-500 truncate mb-2">
-                    出生于 {new Date(baby.birthDate).toLocaleDateString()}
-                  </p> */}
                   <button 
                     onClick={() => setActiveTab('baby')}
-                    className="text-sm text-teal-600 hover:text-teal-800 font-medium"
+                    className="text-xs md:text-sm text-teal-600 hover:text-teal-800 font-medium"
                   >
                     编辑信息 →
                   </button>

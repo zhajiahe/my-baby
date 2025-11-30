@@ -207,15 +207,16 @@ export default function Milestones() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="max-w-6xl mx-auto space-y-4 md:space-y-6">
+      {/* 页面标题 */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
-          <h2 className="text-3xl font-bold text-gray-800 mb-2">随心记</h2>
-          <p className="text-gray-600">记录宝宝成长的重要时刻</p>
+          <h2 className="text-xl md:text-3xl font-bold text-gray-800 mb-1">随心记</h2>
+          <p className="text-sm md:text-base text-gray-600">记录宝宝成长的重要时刻</p>
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="btn-primary"
+          className="btn-primary text-sm md:text-base py-2 md:py-3"
         >
           添加记录
         </button>
@@ -223,26 +224,26 @@ export default function Milestones() {
 
       {/* Tag Statistics + Filter */}
       {allTags.length > 0 && (
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-gray-800">热门标签</h3>
+        <div className="card p-3 md:p-6">
+          <div className="flex items-center justify-between mb-3 md:mb-4">
+            <h3 className="text-base md:text-lg font-bold text-gray-800">热门标签</h3>
             {activeTag && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-teal-700 bg-teal-100 px-2 py-1 rounded-full">已选: #{activeTag}</span>
+                <span className="text-xs md:text-sm text-teal-700 bg-teal-100 px-2 py-1 rounded-full">已选: #{activeTag}</span>
                 <button className="text-xs text-gray-600 hover:text-red-600" onClick={() => setActiveTag(null)}>清除</button>
               </div>
             )}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 md:gap-4">
             {getTagStats().map(({ tag, count }) => (
               <button
                 key={tag}
                 onClick={() => setActiveTag(prev => prev === tag ? null : tag)}
-                className={`text-center p-1 rounded-lg transition-colors ${activeTag === tag ? 'bg-teal-200' : 'bg-gradient-to-br from-slate-50 to-slate-100 hover:from-teal-50 hover:to-teal-100'}`}
+                className={`text-center p-2 md:p-3 rounded-lg transition-colors ${activeTag === tag ? 'bg-teal-200' : 'bg-gradient-to-br from-slate-50 to-slate-100 hover:from-teal-50 hover:to-teal-100'}`}
               >
-                <div className="text-2xl mb-1">🏷️</div>
-                <div className="text-sm text-gray-700 mb-1">{tag}</div>
-                <div className="text-sm font-bold text-teal-700">{count}</div>
+                <div className="text-lg md:text-2xl mb-0.5 md:mb-1">🏷️</div>
+                <div className="text-xs md:text-sm text-gray-700 mb-0.5 truncate">{tag}</div>
+                <div className="text-xs md:text-sm font-bold text-teal-700">{count}</div>
               </button>
             ))}
           </div>

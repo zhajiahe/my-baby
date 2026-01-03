@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Image from 'next/image'
-import { Camera, Calendar, Clock, Upload, X, Trash2, Image as ImageIcon, Film } from 'lucide-react'
+import { Calendar, Clock, Upload, X, Trash2, Image as ImageIcon, Film } from 'lucide-react'
 import { useBaby } from '@/hooks/useBaby'
 import { useToastContext } from '@/components/providers/ToastProvider'
 import { EmptyPhotos } from '@/components/ui/illustrations'
@@ -718,37 +718,6 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
         >
           上传媒体文件
         </button>
-      </div>
-
-      {/* Stats - 移动端横向滚动或3列 */}
-      <div className="grid grid-cols-3 gap-2 md:gap-6 animate-stagger">
-        <div className="card text-center p-3 md:p-6">
-          <div className="w-8 h-8 md:w-12 md:h-12 mx-auto mb-1 md:mb-2 rounded-full bg-blue-100 flex items-center justify-center">
-            <Camera className="w-4 h-4 md:w-6 md:h-6 text-blue-600" />
-          </div>
-          <p className="text-xs md:text-sm text-gray-600 mb-0.5 md:mb-1">总媒体数</p>
-          <p className="text-lg md:text-2xl font-bold text-blue-600">{mediaItems.length}</p>
-        </div>
-
-        <div className="card text-center p-3 md:p-6">
-          <div className="w-8 h-8 md:w-12 md:h-12 mx-auto mb-1 md:mb-2 rounded-full bg-green-100 flex items-center justify-center">
-            <Calendar className="w-4 h-4 md:w-6 md:h-6 text-green-600" />
-          </div>
-          <p className="text-xs md:text-sm text-gray-600 mb-0.5 md:mb-1">最新</p>
-          <p className="text-sm md:text-2xl font-bold text-green-600 truncate">
-            {mediaItems[0]?.date ? formatDateDisplay(mediaItems[0].date) : '暂无'}
-          </p>
-        </div>
-
-        <div className="card text-center p-3 md:p-6">
-          <div className="w-8 h-8 md:w-12 md:h-12 mx-auto mb-1 md:mb-2 rounded-full bg-teal-100 flex items-center justify-center">
-            <Clock className="w-4 h-4 md:w-6 md:h-6 text-teal-600" />
-          </div>
-          <p className="text-xs md:text-sm text-gray-600 mb-0.5 md:mb-1">时长</p>
-          <p className="text-lg md:text-2xl font-bold text-teal-600">
-            {Object.keys(groupedMediaItems).length}月
-          </p>
-        </div>
       </div>
 
       {/* Upload Form - 统一的多文件上传界面 */}

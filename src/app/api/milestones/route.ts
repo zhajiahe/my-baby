@@ -15,7 +15,12 @@ export async function GET(request: NextRequest) {
       orderBy: { date: 'desc' },
     })
 
-    return NextResponse.json(milestones)
+    return NextResponse.json(milestones, {
+      headers: {
+        // 里程碑缓存 60 秒
+        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
+      },
+    })
   } catch (error) {
     console.error('Error fetching milestones:', error)
     return NextResponse.json({ error: 'Failed to fetch milestones' }, { status: 500 })

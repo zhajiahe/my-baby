@@ -119,7 +119,7 @@ class CacheManager {
 // 全局缓存管理器实例
 export const cacheManager = new CacheManager()
 
-// 通用的缓存hook
+// 通用的缓存hook - 优化版本，支持 stale-while-revalidate
 export function useCache<T>(
   key: string,
   fetcher: () => Promise<T>,
@@ -127,9 +127,10 @@ export function useCache<T>(
     duration?: number
     autoRefresh?: boolean
     dependencies?: readonly unknown[]
+    staleWhileRevalidate?: boolean // 新增：先返回旧数据，后台刷新
   } = {}
 ) {
-  const { duration, autoRefresh = true, dependencies = [] } = options
+  const { duration, autoRefresh = true, dependencies = [], staleWhileRevalidate = true } = options
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -138,20 +139,31 @@ export function useCache<T>(
   const depsString = useMemo(() => JSON.stringify(dependencies), [dependencies])
 
   const fetch = useCallback(async (forceRefresh = false) => {
-    if (!forceRefresh) {
-      const cached = cacheManager.get<T>(key, duration)
-      if (cached !== null) {
-        setData(cached)
-        return cached
-      }
+    // 先检查缓存
+    const cached = cacheManager.get<T>(key, duration)
+    
+    if (!forceRefresh && cached !== null) {
+      setData(cached)
+      return cached
     }
 
+    // stale-while-revalidate: 如果有过期的缓存数据，先返回，后台刷新
+    const staleData = cacheManager.get<T>(key, Infinity) // 获取任何存在的数据
+    if (staleWhileRevalidate && staleData !== null && !forceRefresh) {
+      setData(staleData)
+      // 不设置 loading，后台静默刷新
+    }
+
+    // 防止重复请求
     if (cacheManager.isLoading(key)) {
-      return
+      return staleData ?? undefined
     }
 
     try {
-      setLoading(true)
+      // 只有没有 stale 数据时才显示 loading
+      if (!staleData || forceRefresh) {
+        setLoading(true)
+      }
       setError(null)
       cacheManager.setLoading(key, true)
       
@@ -161,14 +173,17 @@ export function useCache<T>(
       return result
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Unknown error')
-      setError(error)
+      // 只有没有 stale 数据时才显示错误
+      if (!staleData) {
+        setError(error)
+      }
       cacheManager.invalidate(key)
       throw error
     } finally {
       setLoading(false)
       cacheManager.setLoading(key, false)
     }
-  }, [key, fetcher, duration])
+  }, [key, fetcher, duration, staleWhileRevalidate])
 
   // 订阅缓存变化
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useCache, useCacheInvalidation } from './useCacheManager'
 
 interface MediaItem {
@@ -39,21 +39,31 @@ export function usePhotos(babyId?: string) {
     }
   }, [])
 
+  // 分页状态
+  const [hasMore, setHasMore] = useState(true)
+  const [page, setPage] = useState(1)
+  const [allItems, setAllItems] = useState<MediaItem[]>([])
+
   // 使用新的缓存系统
   const {
-    data: mediaItems,
+    data: mediaResponse,
     loading,
     error,
     refetch
-  } = useCache<MediaItem[]>(
+  } = useCache<{ items: MediaItem[]; pagination: { page: number; limit: number; total: number; hasMore: boolean } }>(
     cacheKey,
     async () => {
-      if (!babyId) return []
-      const response = await fetch(`/api/photos?babyId=${babyId}`)
+      if (!babyId) return { items: [], pagination: { page: 1, limit: 50, total: 0, hasMore: false } }
+      const response = await fetch(`/api/photos?babyId=${babyId}&page=1&limit=50`)
       if (!response.ok) {
         throw new Error('Failed to fetch photos')
       }
-      return response.json()
+      const data = await response.json()
+      // 兼容旧 API 格式
+      if (Array.isArray(data)) {
+        return { items: data, pagination: { page: 1, limit: data.length, total: data.length, hasMore: false } }
+      }
+      return data
     },
     {
       duration: 5 * 60 * 1000, // 5分钟缓存
@@ -62,23 +72,58 @@ export function usePhotos(babyId?: string) {
     }
   )
 
+  // 同步数据到 allItems
+  useEffect(() => {
+    if (mediaResponse?.items) {
+      setAllItems(mediaResponse.items)
+      setHasMore(mediaResponse.pagination?.hasMore ?? false)
+      setPage(1)
+    }
+  }, [mediaResponse])
+
+  // 加载更多
+  const loadMore = useCallback(async () => {
+    if (!babyId || !hasMore || loading) return
+    
+    const nextPage = page + 1
+    try {
+      const response = await fetch(`/api/photos?babyId=${babyId}&page=${nextPage}&limit=50`)
+      if (!response.ok) throw new Error('Failed to load more')
+      
+      const data = await response.json()
+      const newItems = Array.isArray(data) ? data : data.items
+      const pagination = data.pagination
+      
+      setAllItems(prev => [...prev, ...newItems])
+      setPage(nextPage)
+      setHasMore(pagination?.hasMore ?? false)
+    } catch (err) {
+      console.error('Failed to load more photos:', err)
+    }
+  }, [babyId, hasMore, loading, page])
+
+  const mediaItems = allItems
+
   const [operationError, setOperationError] = useState<string | null>(null)
 
   // 手动触发获取photos的方法
   const fetchPhotos = useCallback(async (forceRefresh = false, birthDate?: string) => {
     try {
-      const data = await refetch(forceRefresh)
+      const response = await refetch(forceRefresh)
+      
+      // 从新 API 响应中提取 items
+      const items = response?.items || []
       
       // 如果有birthDate，计算年龄
-      if (data && birthDate) {
-        const itemsWithAge = data.map((item: MediaItem) => ({
+      if (items.length > 0 && birthDate) {
+        const itemsWithAge = items.map((item: MediaItem) => ({
           ...item,
           age: calculateAge(item.date, birthDate)
         }))
         return itemsWithAge
       }
       
-      return data
+      return items
     } catch (err) {
       throw err
     }
@@ -159,10 +204,16 @@ export function usePhotos(babyId?: string) {
     fetchPhotos,
     uploadPhoto,
     deletePhoto,
+    loadMore,
+    hasMore,
     setMediaItems: () => {
       // 兼容现有代码，但建议使用cache invalidation
       console.warn('setMediaItems is deprecated, use cache invalidation instead')
     },
-    refetch: (forceRefresh = false) => refetch(forceRefresh)
+    refetch: (forceRefresh = false) => {
+      setPage(1)
+      setAllItems([])
+      return refetch(forceRefresh)
+    }
   }
 } 

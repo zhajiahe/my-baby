@@ -380,19 +380,21 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
           body: formData,
         });
 
+        // 先读取响应文本，再尝试解析 JSON（避免 body 被消费的问题）
+        const responseText = await uploadResponse.text();
+        
         if (!uploadResponse.ok) {
           let errorMessage = '上传文件失败';
           try {
-            const errorData = await uploadResponse.json();
+            const errorData = JSON.parse(responseText);
             errorMessage = errorData.error || errorData.message || errorMessage;
           } catch {
-            // 如果响应不是有效的 JSON，尝试读取文本
-            try {
-              const errorText = await uploadResponse.text();
-              if (errorText) {
-                errorMessage = errorText.substring(0, 100); // 限制错误消息长度
-              }
-            } catch {
+            // 如果响应不是有效的 JSON，使用原始文本
+            if (responseText) {
+              // 清理错误消息，提取有用的信息
+              const cleanedMessage = responseText.replace(/<[^>]*>/g, '').trim();
+              errorMessage = cleanedMessage.substring(0, 100) || `上传失败 (HTTP ${uploadResponse.status})`;
+            } else {
               errorMessage = `上传失败 (HTTP ${uploadResponse.status})`;
             }
           }
@@ -401,8 +403,9 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
 
         let uploadResult;
         try {
-          uploadResult = await uploadResponse.json();
+          uploadResult = JSON.parse(responseText);
         } catch {
+          console.error('Failed to parse upload response:', responseText.substring(0, 200));
           throw new Error('服务器响应格式错误');
         }
 
@@ -429,21 +432,30 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
           body: JSON.stringify(mediaDataForDb),
         });
 
+        // 先读取响应文本
+        const saveResponseText = await saveResponse.text();
+        
         if (!saveResponse.ok) {
           let errorMessage = '保存媒体信息失败';
           try {
-            const errorData = await saveResponse.json();
+            const errorData = JSON.parse(saveResponseText);
             errorMessage = errorData.error || errorData.message || errorMessage;
           } catch {
-            errorMessage = `保存失败 (HTTP ${saveResponse.status})`;
+            if (saveResponseText) {
+              const cleanedMessage = saveResponseText.replace(/<[^>]*>/g, '').trim();
+              errorMessage = cleanedMessage.substring(0, 100) || `保存失败 (HTTP ${saveResponse.status})`;
+            } else {
+              errorMessage = `保存失败 (HTTP ${saveResponse.status})`;
+            }
           }
           throw new Error(errorMessage);
         }
 
         let savedItem;
         try {
-          savedItem = await saveResponse.json();
+          savedItem = JSON.parse(saveResponseText);
         } catch {
+          console.error('Failed to parse save response:', saveResponseText.substring(0, 200));
           throw new Error('保存响应格式错误');
         }
         successfulItems.push({

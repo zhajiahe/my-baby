@@ -351,22 +351,29 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     }
   };
 
-  // 辅助函数：生成视频缩略图（使用 Video + Canvas）
-  const generateVideoThumbnail = async (file: File): Promise<Blob | null> => {
+  // 辅助函数：处理视频元数据（缩略图 + 时长，只加载一次视频）
+  const processVideoMetadata = async (file: File): Promise<{
+    thumbnail: Blob | null;
+    duration: number | null;
+  }> => {
     return new Promise((resolve) => {
       const video = document.createElement('video');
       video.preload = 'metadata';
       video.muted = true;
       video.playsInline = true;
       
+      let duration: number | null = null;
+      
       // 超时处理
       const timeout = setTimeout(() => {
         URL.revokeObjectURL(video.src);
-        resolve(null);
+        resolve({ thumbnail: null, duration });
       }, 10000);
       
-      video.onloadeddata = () => {
-        // 跳转到第 1 秒或视频中间
+      video.onloadedmetadata = () => {
+        // 获取时长
+        duration = Math.round(video.duration);
+        // 跳转到第 1 秒或视频中间来生成缩略图
         video.currentTime = Math.min(1, video.duration / 2);
       };
       
@@ -384,51 +391,23 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
             ctx.drawImage(video, 0, 0, width, height);
             canvas.toBlob((blob) => {
               URL.revokeObjectURL(video.src);
-              resolve(blob);
+              resolve({ thumbnail: blob, duration });
             }, 'image/jpeg', 0.8);
           } else {
             URL.revokeObjectURL(video.src);
-            resolve(null);
+            resolve({ thumbnail: null, duration });
           }
         } catch (err) {
           console.error('Failed to generate video thumbnail:', err);
           URL.revokeObjectURL(video.src);
-          resolve(null);
+          resolve({ thumbnail: null, duration });
         }
       };
       
       video.onerror = () => {
         clearTimeout(timeout);
         URL.revokeObjectURL(video.src);
-        resolve(null);
-      };
-      
-      video.src = URL.createObjectURL(file);
-    });
-  };
-
-  // 辅助函数：获取视频时长
-  const getVideoDuration = async (file: File): Promise<number | null> => {
-    return new Promise((resolve) => {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      
-      const timeout = setTimeout(() => {
-        URL.revokeObjectURL(video.src);
-        resolve(null);
-      }, 5000);
-      
-      video.onloadedmetadata = () => {
-        clearTimeout(timeout);
-        const duration = Math.round(video.duration);
-        URL.revokeObjectURL(video.src);
-        resolve(duration);
-      };
-      
-      video.onerror = () => {
-        clearTimeout(timeout);
-        URL.revokeObjectURL(video.src);
-        resolve(null);
+        resolve({ thumbnail: null, duration: null });
       };
       
       video.src = URL.createObjectURL(file);
@@ -494,8 +473,11 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     let duration: number | null = null;
     
     if (isVideo) {
-      // 生成视频缩略图
-      const thumbnailBlob = await generateVideoThumbnail(file);
+      // 同时获取视频缩略图和时长（只加载一次视频）
+      const { thumbnail: thumbnailBlob, duration: videoDuration } = await processVideoMetadata(file);
+      duration = videoDuration;
+      
+      // 上传缩略图
       if (thumbnailBlob && urlData.thumbnailUploadUrl) {
         try {
           const thumbResponse = await fetch(urlData.thumbnailUploadUrl, {
@@ -510,9 +492,6 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
           console.warn('Failed to upload video thumbnail:', err);
         }
       }
-      
-      // 获取视频时长
-      duration = await getVideoDuration(file);
       onProgress(90);
     } else {
       onProgress(90);

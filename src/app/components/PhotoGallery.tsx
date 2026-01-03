@@ -319,27 +319,96 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     return ext ? `${safeName}.${ext}` : safeName;
   };
 
-  // 辅助函数：创建干净的文件对象（解决 iOS Safari 兼容性问题）
-  const createCleanFile = async (file: File): Promise<File> => {
-    try {
-      // 读取文件为 ArrayBuffer
+  // 辅助函数：HEIC/HEIF 转换为 JPEG（客户端处理）
+  const convertHeicToJpeg = async (file: File): Promise<{ blob: Blob; type: string }> => {
+    // 检查是否是 HEIC/HEIF
+    const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || 
+                   file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
+    
+    if (!isHeic) {
       const arrayBuffer = await file.arrayBuffer();
-      // 创建新的 Blob
-      const blob = new Blob([arrayBuffer], { type: file.type || 'application/octet-stream' });
-      // 使用安全的文件名创建新的 File 对象
-      const safeName = sanitizeFileName(file.name);
-      return new File([blob], safeName, { 
-        type: file.type || 'application/octet-stream',
-        lastModified: file.lastModified || Date.now()
-      });
+      return { blob: new Blob([arrayBuffer], { type: file.type }), type: file.type };
+    }
+    
+    // 使用 Canvas 转换（仅适用于浏览器已支持 HEIC 的情况）
+    // 对于不支持的浏览器，尝试原样上传
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
+      console.log('HEIC file detected, attempting to process as JPEG');
+      return { blob, type: 'image/jpeg' };
     } catch (error) {
-      console.error('Error creating clean file:', error);
-      // 如果处理失败，返回原始文件
-      return file;
+      console.warn('HEIC conversion failed, uploading as-is:', error);
+      const arrayBuffer = await file.arrayBuffer();
+      return { blob: new Blob([arrayBuffer], { type: file.type }), type: file.type };
     }
   };
 
-  // 上传处理 - 使用后端处理视频封面
+  // 辅助函数：直接上传到 R2（绕过服务器，解决文件大小限制）
+  const uploadDirectToR2 = async (
+    file: File, 
+    onProgress: (progress: number) => void
+  ): Promise<{
+    url: string;
+    mediaType: 'IMAGE' | 'VIDEO';
+    format: string;
+    thumbnailUrl: string | null;
+  }> => {
+    const isVideo = file.type.startsWith('video/');
+    
+    // 处理文件（HEIC 转换等）
+    const { blob, type: processedType } = isVideo 
+      ? { blob: new Blob([await file.arrayBuffer()], { type: file.type }), type: file.type }
+      : await convertHeicToJpeg(file);
+    
+    onProgress(10);
+    
+    // 步骤1: 获取预签名 URL
+    const urlResponse = await fetch('/api/photos/generate-upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: sanitizeFileName(file.name),
+        contentType: processedType,
+        isVideo,
+      }),
+    });
+    
+    if (!urlResponse.ok) {
+      const errorData = await urlResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || '获取上传链接失败');
+    }
+    
+    const urlData = await urlResponse.json();
+    onProgress(20);
+    
+    // 步骤2: 直接上传到 R2
+    const uploadResponse = await fetch(urlData.uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': urlData.contentType,
+      },
+      body: blob,
+    });
+    
+    if (!uploadResponse.ok) {
+      throw new Error(`上传失败 (HTTP ${uploadResponse.status})`);
+    }
+    
+    onProgress(80);
+    
+    // 视频暂不生成缩略图（需要客户端处理或异步处理）
+    // TODO: 可以使用 video 元素截取第一帧作为缩略图
+    
+    return {
+      url: urlData.publicUrl,
+      mediaType: urlData.mediaType,
+      format: urlData.format,
+      thumbnailUrl: urlData.thumbnailPublicUrl || null,
+    };
+  };
+
+  // 上传处理 - 直接上传到 R2（更快，无文件大小限制）
   const handleUpload = async () => {
     if (!baby?.id) {
       toast.error('验证失败', '请先创建宝宝信息。');
@@ -363,67 +432,28 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
       ));
 
       try {
-        // 创建干净的文件对象（解决 iOS Safari 兼容性问题）
-        const cleanFile = await createCleanFile(item.file);
-        
-        // 使用后端上传 API 处理文件（包括视频封面生成）
-        const formData = new FormData();
-        formData.append('file', cleanFile);
-
-        // 更新进度到 20%
-        setUploadFiles(prev => prev.map(f => 
-          f.id === item.id ? { ...f, progress: 20 } : f
-        ));
-
-        const uploadResponse = await fetch('/api/photos/upload', {
-          method: 'POST',
-          body: formData,
+        // 直接上传到 R2（绕过服务器）
+        const uploadResult = await uploadDirectToR2(item.file, (progress) => {
+          setUploadFiles(prev => prev.map(f => 
+            f.id === item.id ? { ...f, progress } : f
+          ));
         });
 
-        // 先读取响应文本，再尝试解析 JSON（避免 body 被消费的问题）
-        const responseText = await uploadResponse.text();
-        
-        if (!uploadResponse.ok) {
-          let errorMessage = '上传文件失败';
-          try {
-            const errorData = JSON.parse(responseText);
-            errorMessage = errorData.error || errorData.message || errorMessage;
-          } catch {
-            // 如果响应不是有效的 JSON，使用原始文本
-            if (responseText) {
-              // 清理错误消息，提取有用的信息
-              const cleanedMessage = responseText.replace(/<[^>]*>/g, '').trim();
-              errorMessage = cleanedMessage.substring(0, 100) || `上传失败 (HTTP ${uploadResponse.status})`;
-            } else {
-              errorMessage = `上传失败 (HTTP ${uploadResponse.status})`;
-            }
-          }
-          throw new Error(errorMessage);
-        }
-
-        let uploadResult;
-        try {
-          uploadResult = JSON.parse(responseText);
-        } catch {
-          console.error('Failed to parse upload response:', responseText.substring(0, 200));
-          throw new Error('服务器响应格式错误');
-        }
-
-        // 更新进度到 70%
+        // 更新进度到 85%
         setUploadFiles(prev => prev.map(f => 
-          f.id === item.id ? { ...f, progress: 70, uploadedUrl: uploadResult.url } : f
+          f.id === item.id ? { ...f, progress: 85, uploadedUrl: uploadResult.url } : f
         ));
 
         // 保存元数据到数据库
         const mediaDataForDb = {
           babyId: baby.id,
           date: uploadDate,
-          title: item.title || '', // 标题可以为空
+          title: item.title || '',
           url: uploadResult.url,
           mediaType: uploadResult.mediaType,
           format: uploadResult.format,
           thumbnailUrl: uploadResult.thumbnailUrl || null,
-          duration: uploadResult.duration || null,
+          duration: null, // 视频时长暂不处理
         };
 
         const saveResponse = await fetch('/api/photos', {

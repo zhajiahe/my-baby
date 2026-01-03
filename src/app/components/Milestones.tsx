@@ -286,7 +286,7 @@ export default function Milestones() {
           }}
         >
           <div 
-            className="bg-white rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto"
+            className="bg-white dark:bg-slate-800 rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">
@@ -295,7 +295,7 @@ export default function Milestones() {
               </h3>
               <button
                 onClick={resetForm}
-                className="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-red-500 text-gray-600 hover:text-white rounded-full transition-all duration-200 shadow-md hover:shadow-lg"
+                className="flex items-center justify-center w-10 h-10 bg-gray-100 dark:bg-slate-700 hover:bg-red-500 text-gray-600 dark:text-gray-300 hover:text-white rounded-full transition-all duration-200 shadow-md hover:shadow-lg"
                 title="关闭"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -375,7 +375,7 @@ export default function Milestones() {
                             className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium transition-colors ${
                               isSelected
                                 ? 'bg-teal-200 text-teal-800 cursor-not-allowed opacity-50'
-                                : 'bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700 cursor-pointer'
+                                : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-teal-100 dark:hover:bg-teal-900/50 hover:text-teal-700 dark:hover:text-teal-400 cursor-pointer'
                             }`}
                           >
                             #{tag} {isSelected && '✓'}

@@ -258,7 +258,7 @@ export default function Dashboard({ setActiveTab }: DashboardProps) {
             ) : recentMilestones.length > 0 ? (
               <div className="space-y-3 mb-4 flex-1">
                 {recentMilestones.map((milestone) => (
-                  <div key={milestone.id} className="flex items-start space-x-4 p-4 bg-white/70 backdrop-blur-sm rounded-lg">
+                  <div key={milestone.id} className="flex items-start space-x-4 p-4 bg-white/70 dark:bg-slate-700/70 backdrop-blur-sm rounded-lg">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-2 min-w-0">
                         <span className="font-medium text-gray-800 text-base truncate">
@@ -301,7 +301,7 @@ export default function Dashboard({ setActiveTab }: DashboardProps) {
                   try { if (typeof window !== 'undefined') { sessionStorage.setItem('openMilestoneForm', '1') } } catch {}
                   setActiveTab('milestones')
                 }}
-                className="btn-secondary bg-white text-amber-600 border-amber-300 hover:bg-amber-50 py-3"
+                className="btn-secondary bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-500 hover:bg-amber-50 dark:hover:bg-slate-600 py-3"
               >
                 增加记录
               </button>
@@ -318,7 +318,7 @@ export default function Dashboard({ setActiveTab }: DashboardProps) {
           <div className="card p-6 bg-gradient-to-br from-emerald-50 via-cyan-50 to-teal-50 min-h-[400px] flex flex-col shadow-lg">
             {chartData.length > 0 ? (
               <div className="flex-1">
-                <div className="h-80 bg-white/80 backdrop-blur-sm rounded-xl p-4 shadow-inner">
+                <div className="h-80 bg-white/80 dark:bg-slate-700/80 backdrop-blur-sm rounded-xl p-4 shadow-inner">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={chartData} margin={{ top: 10, right: 30, left: 10, bottom: 10 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#34d399" opacity={0.3} />

@@ -189,7 +189,7 @@ export default function BabyInfo() {
 
       {showAvatarUpload && (
         <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-md w-full p-6">
+          <div className="bg-white dark:bg-slate-800 rounded-xl max-w-md w-full p-6">
             <h3 className="text-xl font-bold text-gray-800 mb-4">更换头像</h3>
             
             <div className="space-y-4">
@@ -474,7 +474,7 @@ export default function BabyInfo() {
               placeholder="关于宝宝的其他信息..."
             />
           ) : (
-            <p className="text-lg text-gray-800 bg-gray-50 p-4 rounded-lg">
+            <p className="text-lg text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-slate-700 p-4 rounded-lg">
               {babyInfo.notes || '暂无备注'}
             </p>
           )}

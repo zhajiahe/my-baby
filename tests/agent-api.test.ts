@@ -1,0 +1,102 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { ContractError, validateRequest, resolveGrant } from '../shared/agent'
+import { agentHandler } from '../src/lib/agent/handler'
+import { executeOperation, type AgentResult, type AgentStore, type Receipt, type ReceiptKey } from '../src/lib/agent/service'
+
+const grants = JSON.stringify([{ source: 'weixin', botId: 'bot', userId: 'allowed', babyId: 'baby-allowed' }])
+const request = { source: 'weixin', botId: 'bot', userId: 'allowed', messageId: 'message-1',
+  operation: 'create_growth_record', operationKey: 'op_0', args: { date: '2026-10-10', weight: 10.5 } }
+
+class UniqueConflict extends Error {}
+function memoryStore() {
+  const receipts = new Map<string, Receipt>()
+  const records: Record<string, unknown>[] = []
+  const keyOf = (key: ReceiptKey) => JSON.stringify(key)
+  let failReceipt = false
+  const store: AgentStore = {
+    async baby(babyId) { assert.equal(babyId, 'baby-allowed'); return { name: '测试宝宝', birthDate: '2025-01-01' } },
+    async growth(babyId) { assert.equal(babyId, 'baby-allowed'); return records },
+    async findReceipt(key) { return receipts.get(keyOf(key)) ?? null },
+    async transaction(fn) {
+      const writes: Record<string, unknown>[] = []
+      const pending = new Map<string, Receipt>()
+      const snapshot = new Map(receipts)
+      const result = await fn({
+        async findReceipt(key) { return snapshot.get(keyOf(key)) ?? null },
+        async mutate(input, babyId) {
+          assert.equal(babyId, 'baby-allowed')
+          const value = { id: `record-${crypto.randomUUID()}`, ...input.args }
+          writes.push(value); return value
+        },
+        async saveReceipt(key, receipt) {
+          if (failReceipt) throw new Error('injected_commit_failure')
+          pending.set(keyOf(key), receipt)
+        },
+      })
+      if ([...pending.keys()].some(key => receipts.has(key))) throw new UniqueConflict()
+      for (const [key, receipt] of pending) receipts.set(key, receipt)
+      records.push(...writes)
+      return result
+    },
+    isUniqueConflict(error) { return error instanceof UniqueConflict },
+  }
+  return { store, records, failReceipt(value: boolean) { failReceipt = value } }
+}
+
+test('grants are mandatory, unambiguous and identity-specific; model cannot pass babyId', () => {
+  assert.throws(() => resolveGrant(request as never, undefined), (e: unknown) => e instanceof ContractError && e.status === 503)
+  assert.throws(() => resolveGrant({ ...request, userId: 'stranger' } as never, grants), (e: unknown) => e instanceof ContractError && e.status === 403)
+  assert.throws(() => resolveGrant(request as never, `[${JSON.parse(grants).map((g: object) => JSON.stringify(g)).join(',')},${JSON.stringify(JSON.parse(grants)[0])}]`))
+  assert.throws(() => validateRequest({ ...request, args: { ...request.args, babyId: 'other-baby' } }))
+  assert.throws(() => validateRequest({ ...request, babyId: 'other-baby' }))
+})
+
+test('all operations reject invalid dates, units/types and arbitrary tools before mutation', () => {
+  for (const args of [{ date: '2026-02-30', weight: 10 }, { date: '2026-10-10', weight: '10.5' },
+    { date: '2026-10-10', weight: -1 }, { date: '2026-10-10' }]) assert.throws(() => validateRequest({ ...request, args }))
+  assert.throws(() => validateRequest({ ...request, operation: 'delete_baby', args: {} }))
+})
+
+test('duplicate write returns the committed result, changed payload gets 409', async () => {
+  const { store, records } = memoryStore()
+  const first = await executeOperation(request, { store, grants, writesEnabled: true })
+  const replay = await executeOperation(request, { store, grants, writesEnabled: true })
+  assert.equal(records.length, 1); assert.equal(first.data.id, replay.data.id); assert.ok(replay.replayed)
+  await assert.rejects(executeOperation({ ...request, args: { ...request.args, weight: 11 } }, { store, grants, writesEnabled: true }),
+    (e: unknown) => e instanceof ContractError && e.status === 409)
+  assert.equal(records.length, 1)
+})
+
+test('same-type operations use stable distinct keys; concurrent identical writes commit once', async () => {
+  const { store, records } = memoryStore()
+  const results = await Promise.all([executeOperation(request, { store, grants, writesEnabled: true }),
+    executeOperation(request, { store, grants, writesEnabled: true })])
+  assert.equal(records.length, 1); assert.equal(results[0].data.id, results[1].data.id)
+  await executeOperation({ ...request, operationKey: 'op_1' }, { store, grants, writesEnabled: true })
+  assert.equal(records.length, 2)
+})
+
+test('receipt insertion failure rolls back business mutation', async () => {
+  const h = memoryStore(); h.failReceipt(true)
+  await assert.rejects(executeOperation(request, { store: h.store, grants, writesEnabled: true }))
+  assert.equal(h.records.length, 0)
+  h.failReceipt(false)
+  await executeOperation(request, { store: h.store, grants, writesEnabled: true })
+  assert.equal(h.records.length, 1)
+})
+
+test('service authentication separate from cookie; writes disabled by default; private caching', async () => {
+  const h = memoryStore(), token = 't'.repeat(64)
+  const handler = agentHandler({ store: h.store, token, grants, writesEnabled: false })
+  const call = (body: unknown, headers: Record<string, string> = {}) => handler(new Request('https://test/api/agent/v1', {
+    method: 'POST', headers, body: JSON.stringify(body),
+  }))
+  assert.equal((await call(request, { cookie: 'mybaby_session=any' })).status, 401)
+  assert.equal((await call(request, { authorization: `Bearer ${token}` })).status, 403)
+  assert.equal(h.records.length, 0)
+  const response = await call({ ...request, operation: 'get_baby_summary', args: {} }, { authorization: `Bearer ${token}` })
+  assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'private, no-store')
+  const result = await response.json() as AgentResult
+  assert.equal(result.baby.name, '测试宝宝')
+})

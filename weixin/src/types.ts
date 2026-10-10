@@ -7,6 +7,12 @@ export interface Env {
   WEIXIN_ADMIN_TOKEN: string;
   WEIXIN_BOT_TOKEN: string;
   OPENROUTER_MODEL: string;
+  AGENT_MODE?: 'bridge' | 'agent';
+  OPENROUTER_API_KEY?: string;
+  MYBABY_API_ORIGIN?: string;
+  MYBABY_AGENT_TOKEN?: string;
+  AGENT_WRITES_ENABLED?: string;
+  AGENT_TIME_ZONE?: string;
 }
 
 // Queue contains references only, never message text or context credentials.
@@ -33,10 +39,11 @@ export type StoredEvent = {
   id: string;
   generation: number;
   user_id: string;
+  message_id: string;
   text: string;
   context_token: string;
   received_at: number;
-  state: 'pending' | 'queued' | 'sending' | 'done' | 'failed' | 'unknown' | 'stale';
+  state: 'pending' | 'queued' | 'processing' | 'sending' | 'done' | 'failed' | 'unknown' | 'stale';
   lease_until: number;
 };
 

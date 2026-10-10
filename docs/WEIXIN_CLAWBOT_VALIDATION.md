@@ -64,7 +64,7 @@ npm test
 cf deploy --dry-run
 ```
 
-最新本地结果：`npm run typecheck` 通过，`npm test` 的 21 个用例全部通过，`cf deploy --dry-run` 通过。
+阶段 A 提交时的本地结果：`npm run typecheck` 通过，`npm test` 的 21 个用例全部通过，`cf deploy --dry-run` 通过。B 的新增检查与部署边界见 [阶段 B 文档](./AGENT_V1.md)。
 
 测试覆盖：
 - 可信 URL、权限、正文大小限制与消息规范化。
@@ -103,4 +103,4 @@ cf deploy --dry-run
 - [ ] 至少 24 小时阶段 A 观测；阶段 C 再做 72 小时稳定性测试。
 - [ ] 实际配额与费用监控、DLQ 人工重放、未完成事件的清理策略。
 
-下一步是本机前台执行 `cd weixin && npm run login`，微信扫码后按 Worker README 上传 Secret、绑定和启动。**不能把当前健康检查成功写成微信接入验收通过。**
+下一步是本机前台执行 `cd weixin && npm run login`，微信扫码后按最新 Worker README 准备本地 Secrets、构建上传、绑定和启动。当前工作树包含 B 的额外 Secret 声明，沿用旧凭证文件前必须先执行 `secrets:prepare`。**不能把当前健康检查成功写成微信接入验收通过。**

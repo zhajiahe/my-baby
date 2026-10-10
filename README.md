@@ -74,7 +74,11 @@ cp env.example .env
 npm run db:generate
 npm run db:push
 
-# 5. 启动开发服务器
+# 5. 生成本地家庭登录凭证（0600 .env.local，不输出密码；已有文件需手工合并）
+npm run auth:setup
+# 私下读取 .env.local 中的家庭密码以登录，勿提交凭证
+
+# 6. 启动开发服务器
 npm run dev
 ```
 
@@ -83,6 +87,8 @@ npm run dev
 📖 **详细开发和部署指南请参考 [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)**
 
 📋 **微信 ClawBot：[Cloudflare 实施计划](./docs/WEIXIN_CLAWBOT_PLAN.md) · [Worker 操作指南](./weixin/README.md) · [核验记录](./docs/WEIXIN_CLAWBOT_VALIDATION.md)**（阶段 A 基础设施已部署，微信扫码与收发验收待完成）
+
+🔐 **[家庭密码登录与 Agent API](./docs/AGENT_V1.md)**：阶段 B 本地实现已完成，未部署；原页面/API 需要服务端密码与会话 Secret，未配置时拒绝访问。
 
 ## 📝 可用脚本
 
@@ -246,8 +252,9 @@ Vercel 是 Next.js 官方托管平台，提供最佳部署体验：
 
 1. 将代码推送到 GitHub
 2. 在 [Vercel](https://vercel.com) 中导入项目
-3. 配置环境变量
-4. 自动部署完成
+3. 配置环境变量，包括 `MYBABY_APP_PASSWORD` 和 `MYBABY_SESSION_SECRET`；强密码和会话 Secret 不使用 `NEXT_PUBLIC_` 前缀。未配置时站点拒绝访问。
+4. 审查 [家庭登录与 Agent API 上线门槛](./docs/AGENT_V1.md)，再允许自动部署；Agent 写入默认关闭。
+5. 自动部署完成
 
 📖 **详细部署步骤请参考 [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md#vercel-部署)**
 

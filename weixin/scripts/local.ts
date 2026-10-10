@@ -17,7 +17,8 @@ export async function loadLocal<T>(name: string): Promise<T> {
   const path = join(localDir, name);
   const info = await stat(path);
   if (process.platform !== 'win32' && (info.mode & 0o077)) throw new Error('local_file_permissions_must_be_0600');
-  return JSON.parse(await readFile(path, 'utf8')) as T;
+  const content = await readFile(path, 'utf8');
+  try { return JSON.parse(content) as T; } catch { throw new Error('local_file_invalid_json'); }
 }
 
 export function workerOrigin(input: string): string {

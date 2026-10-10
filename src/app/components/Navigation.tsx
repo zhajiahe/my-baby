@@ -1,6 +1,7 @@
 'use client'
 
 import { Home, TrendingUp, Award, Camera, type LucideIcon } from 'lucide-react'
+import { LogoutButton } from '@/components/ui/LogoutButton'
 
 interface NavigationProps {
   activeTab: string
@@ -29,6 +30,7 @@ export default function Navigation({ activeTab, setActiveTab }: NavigationProps)
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center space-x-2">
               <h1 className="text-lg font-bold">小好小宇宙</h1>
+              <LogoutButton />
             </div>
             
             <div className="flex space-x-1">
@@ -58,6 +60,7 @@ export default function Navigation({ activeTab, setActiveTab }: NavigationProps)
       <header className="nav-bar sticky top-0 z-50 md:hidden">
         <div className="flex items-center justify-center h-12 px-4">
           <h1 className="text-base font-bold">小好小宇宙</h1>
+          <LogoutButton />
         </div>
       </header>
 

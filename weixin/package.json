@@ -12,6 +12,8 @@
     "build": "cf build",
     "login": "tsx scripts/login.ts",
     "session": "tsx scripts/session.ts",
+    "test:model": "tsx scripts/model-smoke.ts",
+    "secrets:prepare": "tsx scripts/prepare-secrets.ts",
     "check": "npm run typecheck && npm test && cf deploy --dry-run"
   },
   "dependencies": { "qrcode-terminal": "0.12.0" },

@@ -92,3 +92,19 @@ model MediaItem {
   @@map("media_items") // Changed from "photos"
   @@index([babyId, date])
 }
+
+// Written atomically with an Agent business mutation. Not applied to production
+// until the reviewed additive SQL change has been approved.
+model AgentOperation {
+  id           String   @id @default(cuid())
+  source       String
+  botId        String
+  messageId    String
+  operationKey String
+  payloadHash  String
+  result       Json
+  createdAt    DateTime @default(now())
+
+  @@unique([source, botId, messageId, operationKey])
+  @@map("agent_operations")
+}

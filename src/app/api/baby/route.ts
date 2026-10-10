@@ -19,8 +19,8 @@ export async function GET() {
 
     return NextResponse.json(baby, {
       headers: {
-        // 边缘缓存 60 秒，后台重新验证 5 分钟
-        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
+        // Family data must never be stored in shared CDN caches.
+        'Cache-Control': 'private, no-store',
       },
     })
   } catch (error) {

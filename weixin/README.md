@@ -2,7 +2,7 @@
 
 独立于根目录 Next.js 项目，使用 TypeScript + Cloudflare **cf CLI** + SQLite Durable Object + Alarms + Queue。没有安装 OpenClaw，也没有 VPS。
 
-当前只做受授权的文本收发验证，回复固定测试文字，**不会调用 LLM，也不会写入宝宝记录**。阶段 B 已预设 OpenRouter 模型 `meta/muse-spark-1.3-contributor`。
+当前**云端部署**仍只做受授权的文本收发验证，回复固定测试文字，不调用 LLM 或写入宝宝记录。阶段 B 的本地 Agent/API 与密码登录实现已完成，尚未部署；OpenRouter 模型为 `meta/muse-spark-1.3-contributor`。详见 [阶段 B 操作与边界](../docs/AGENT_V1.md)。
 
 ## 当前进度
 
@@ -57,6 +57,8 @@ npm run login
 首次绑定时执行：
 
 ```bash
+npm run secrets:prepare      # 当前代码新增了 B 的 Secret；读取本地 .env，不输出/上传 key
+npm run build               # 使用当前源代码，保持 AGENT_MODE=bridge
 cf deploy --prebuilt --secrets-file .local/secrets.json
 npm run session -- bind
 npm run session -- start
@@ -79,6 +81,7 @@ npm run session -- status
 ```bash
 npm run session -- pause
 npm run login
+npm run secrets:prepare
 cf deploy --secrets-file .local/secrets.json
 npm run session -- bind
 npm run session -- start
@@ -113,6 +116,14 @@ DO 的 `/consume` 只通过绑定由 Queue 消费者调用，没有公共 HTTP �
 - Queue 至少一次投递，不保证 FIFO。阶段 A 不提供会话顺序或主动提醒保证。
 - 当前账号创建的 Queue/DLQ 保留期均为 24 小时，不能假设 Paid 默认 4 天。DLQ 应及时处理，阶段 C 需要外部告警、重放与积压恢复。
 - 不承诺 Free 额度足够或第三方独立客户端永久可用；资源消耗和长轮询兼容性必须实测。
+
+## 阶段 B 本地测试（不部署）
+
+```bash
+npm run test:model           # 使用 weixin/.env key，合成数据；不调用业务 API
+```
+
+根目录的家庭登录、Agent API、数据库追加 SQL 及本地验证步骤见 `docs/AGENT_V1.md`。默认 `AGENT_MODE=bridge` 与写入关闭；不要在协议、权限、真实数据库事务和生产部署验收前开启。
 
 ## 阶段 A 云端验收
 

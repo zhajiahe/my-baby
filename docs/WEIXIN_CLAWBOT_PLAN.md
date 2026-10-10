@@ -1,6 +1,6 @@
 # MyBaby 微信 ClawBot：Cloudflare 轻量化实施计划
 
-> 状态：阶段 A 已实现并部署基础设施；尚未扫码与完成微信收发验收。进度和核验证据见 [实施记录](./WEIXIN_CLAWBOT_VALIDATION.md)，操作步骤见 [Worker README](../weixin/README.md)。
+> 状态：阶段 A 已部署基础设施，微信扫码与收发待验收；经用户确认，阶段 B 已先完成本地实现与测试，未部署或变更生产数据库。证据见 [实施记录](./WEIXIN_CLAWBOT_VALIDATION.md)，B 的范围见 [家庭登录与 Agent API](./AGENT_V1.md)。
 > 目标：无 VPS、无 OpenClaw，以独立 Cloudflare Worker 接入个人微信，先验证文字收发，再接 MyBaby AI 操作。
 > 本文是总体计划。初稿的外部能力保留意见已有部分经官方文档核验，具体以实施记录为准；官方文档不替代真实微信兼容性和长期运行测试。
 
@@ -13,7 +13,7 @@
 - AI：OpenRouter，用户指定模型 `meta/muse-spark-1.3-contributor`，原生 Tool Calling，不引入 MCP Server、LangChain 或完整 Agent 框架。
 - 业务：受保护的 MyBaby Agent API，暂留 Vercel + Prisma + Neon；媒体保留 R2。
 - 第一版仅文字即时问答与记录，不承诺主动提醒、图片、语音或全站迁移。
-- 阶段 A 必须先通过云端收发与恢复验证，才能进入阶段 B。
+- 原计划 A 验收后再开发 B；用户已确认先完成 B 的本地实现和测试，但 AI 生产接入/业务写入仍必须等待微信、授权、数据库与部署验收。
 
 公开客户端协议不等于官方长期支持第三方独立客户端。准入、服务条款、凭证有效期、账号风险和协议变化均是上线前置风险。
 
@@ -31,7 +31,7 @@
 
 已检查的 baby、growth-records、milestones 集合路由没有路由内鉴权，且 GET 使用公共缓存。不能只保护新增 Agent API 就宣称整个应用安全；需检查所有读写路由、部署侧访问控制、媒体链接与缓存策略。
 
-文档整理后已开始阶段 A：新增独立 `weixin/` Worker，不修改原有 API 或数据库结构；根 TypeScript 配置排除该独立项目。
+阶段 A 新增独立 `weixin/` Worker，根 TypeScript 配置排除该项目。阶段 B 已新增家庭登录、Agent API 与幂等 Prisma 模型/追加 SQL，并移除原有公共缓存；这些 B 改动只在本地验证，尚未部署和执行数据库变更。
 
 ## 3. 目标架构
 
@@ -51,7 +51,7 @@ WeixinSession（Durable Object + Alarm）
 
 业务工具不应依赖微信字段。渠道上下文仅用于认证、审计、幂等和回复；未来 Web AI 或其他渠道复用相同业务接口。
 
-### 目录规划（阶段 A 部分已新增，B 的 Agent/API 尚未实现）
+### 目录规划（A 与 B 的本地代码已新增，B 尚未部署）
 
 ```text
 weixin/
@@ -64,7 +64,7 @@ weixin/
 │   ├── types.ts            # 环境与规范化事件类型
 │   ├── weixin.ts           # iLink 请求、超时、协议错误分类
 │   ├── session.ts          # DO、Alarm、游标、outbox、去重
-│   ├── agent.ts            # B：模型调用与受限工具循环
+│   ├── agent.ts            # B：受限模型工具规划
 │   └── tools.ts            # B：MyBaby 业务接口适配
 ├── scripts/login.ts        # 一次性本地扫码与绑定
 └── tests/                  # 协议 fixture、故障注入、幂等测试
@@ -212,10 +212,10 @@ Agent 设置模型超时、最大工具轮数、输出长度、token 与费用�
 
 ### B：AI 业务操作与安全加固
 
-- [ ] B1 设计 Agent API、服务认证、用户授权映射与现有 API 防绕过措施。
-- [ ] B2 完成共享业务校验、数据库幂等表与事务写入。
-- [ ] B3 实现模型工具循环、持久化操作计划、费用与超时限制。
-- [ ] B4 微信回复使用真实工具结果；完成 Web 页面回归测试。
+- [x] B1 本地实现 Agent API、服务认证、授权映射与家庭密码登录/Proxy；媒体访问和生产限流仍待加固。
+- [ ] B2 本地校验、幂等模型/追加 SQL 和事务实现已完成；真实 PostgreSQL 事务/并发验收及变更应用待完成。
+- [x] B3 本地实现一次受限 Tool Calling 规划、持久化操作计划与超时/token 限制；模型合成输入实测通过，生产费用告警仍待完成。
+- [ ] B4 本地真实结果格式化和生产构建 HTTP 鉴权测试已通过；微信到业务链路与完整页面回归待验收。
 
 验收案例：
 - “小好今天 10.5 公斤”只创建一条授权宝宝的体重记录，日期按指定时区，回复含实际结果。

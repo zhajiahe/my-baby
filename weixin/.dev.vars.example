@@ -1,3 +1,10 @@
 # Local development only. Never commit actual secrets.
 WEIXIN_ADMIN_TOKEN="replace-with-at-least-32-random-characters"
 WEIXIN_BOT_TOKEN="set-after-weixin-qr-login"
+# 阶段 B 本地调试，cf dev 从 .dev.vars 加载。生产默认仍是 bridge。
+OPENROUTER_API_KEY=""
+MYBABY_AGENT_TOKEN=""
+MYBABY_API_ORIGIN="http://localhost:3000"
+AGENT_MODE="bridge"
+AGENT_WRITES_ENABLED="false"
+AGENT_TIME_ZONE="Asia/Shanghai"

@@ -199,6 +199,58 @@ test('persisted send lease protects duplicate consumers and restart does not res
   await h.call('consume', h.queued[0]); assert.equal(h.row(id).state, 'unknown');
 });
 
+test('Agent checkpoints survive restart and reply retry without new model calls or mutations', async t => {
+  const h = harness(); t.after(() => h.close()); await h.bind();
+  Object.assign(h.env, { AGENT_MODE: 'agent', AGENT_WRITES_ENABLED: 'true', OPENROUTER_API_KEY: 'synthetic',
+    MYBABY_API_ORIGIN: 'https://mybaby.example', MYBABY_AGENT_TOKEN: 't'.repeat(64) });
+  let models = 0, writes = 0, sends = 0;
+  t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    if (url.includes('/getupdates')) return Response.json({ ret: 0, msgs: [inbound] });
+    if (url.includes('openrouter')) {
+      models++;
+      return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ type: 'function',
+        function: { name: 'create_growth_record', arguments: JSON.stringify({ date: '2026-10-10', weight: 10.5 }) } }] } }] });
+    }
+    if (url.includes('/sendmessage')) {
+      sends++; return sends === 1 ? new Response('', { status: 429 }) : Response.json({ ret: 0 });
+    }
+    const body = JSON.parse(options.body as string);
+    assert.equal(body.messageId, '123');
+    if (body.operation === 'create_growth_record') writes++;
+    return Response.json({ operation: body.operation, baby: { name: '测试宝宝', birthDate: '2025-01-01' },
+      data: body.operation === 'create_growth_record' ? { id: 'record-once', ...body.args } : {} });
+  });
+  await h.session.alarm();
+  assert.equal((await h.call('consume', h.queued[0])).status, 503);
+  assert.equal(h.row(h.queued[0].eventId).state, 'queued');
+  h.restart(); await h.call('consume', h.queued[0]);
+  assert.equal(models, 1); assert.equal(writes, 1); assert.equal(sends, 2);
+  assert.equal(h.row(h.queued[0].eventId).state, 'done');
+  assert.equal(h.db.prepare('SELECT COUNT(*) AS count FROM agent_runs').get()?.count, 0);
+});
+
+test('pausing during model inference prevents business writes and keeps event resumable', async t => {
+  const h = harness(); t.after(() => h.close()); await h.bind();
+  Object.assign(h.env, { AGENT_MODE: 'agent', AGENT_WRITES_ENABLED: 'true', OPENROUTER_API_KEY: 'synthetic',
+    MYBABY_API_ORIGIN: 'https://mybaby.example', MYBABY_AGENT_TOKEN: 't'.repeat(64) });
+  let release!: () => void, entered!: () => void, writes = 0;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    if (url.includes('/getupdates')) return Response.json({ ret: 0, msgs: [inbound] });
+    if (url.includes('openrouter')) {
+      entered(); await new Promise<void>(resolve => { release = resolve; });
+      return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ type: 'function',
+        function: { name: 'create_growth_record', arguments: JSON.stringify({ date: '2026-10-10', weight: 10.5 }) } }] } }] });
+    }
+    const body = JSON.parse(options.body as string);
+    if (body.operation?.startsWith('create')) writes++;
+    return Response.json({ operation: body.operation, baby: { name: '测试宝宝', birthDate: '2025-01-01' }, data: {} });
+  });
+  await h.session.alarm(); const consume = h.call('consume', h.queued[0]); await started;
+  await h.call('pause'); release(); assert.equal((await consume).status, 503);
+  assert.equal(writes, 0); assert.equal(h.row(h.queued[0].eventId).state, 'queued');
+});
+
 test('unbound sentinel can never start polling', async () => {
   const h = harness();
   try {

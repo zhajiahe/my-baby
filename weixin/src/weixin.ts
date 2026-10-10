@@ -98,7 +98,7 @@ export async function sendText(base: string, token: string, userId: string,
 }
 
 export interface IncomingText {
-  messageId: string; userId: string; text: string; contextToken: string;
+  messageId: string; userId: string; text: string; contextToken: string; receivedAt: number;
 }
 
 export function incomingText(value: unknown, botId: string, allowed: string[]): IncomingText | null {
@@ -120,7 +120,9 @@ export function incomingText(value: unknown, botId: string, allowed: string[]): 
   }
   const text = texts.join('\n').trim();
   if (!text || text.length > 8_000 || m.context_token.length > 8_000) return null;
-  return { messageId: String(id), userId: m.from_user_id, text, contextToken: m.context_token };
+  const receivedAt = typeof m.create_time_ms === 'number' && Number.isSafeInteger(m.create_time_ms)
+    && m.create_time_ms > 0 && m.create_time_ms <= Date.now() + 60_000 ? m.create_time_ms : Date.now();
+  return { messageId: String(id), userId: m.from_user_id, text, contextToken: m.context_token, receivedAt };
 }
 
 export async function eventId(botId: string, messageId: string): Promise<string> {

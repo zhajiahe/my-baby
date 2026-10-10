@@ -10,7 +10,8 @@ async function main(): Promise<void> {
     await saveLocal('client.json', { adminToken, ...(arg ? { origin: workerOrigin(arg) } : {}) });
     // cf requires declared secrets on the first deployment. UNBOUND is a
     // non-credential sentinel; /start explicitly refuses it until QR login.
-    await saveLocal('secrets.json', { WEIXIN_ADMIN_TOKEN: adminToken, WEIXIN_BOT_TOKEN: 'UNBOUND' });
+    await saveLocal('secrets.json', { WEIXIN_ADMIN_TOKEN: adminToken, WEIXIN_BOT_TOKEN: 'UNBOUND',
+      OPENROUTER_API_KEY: 'UNCONFIGURED', MYBABY_AGENT_TOKEN: 'UNCONFIGURED' });
     console.log('已生成本地管理凭证（0600，未输出 token）。部署时使用 --secrets-file .local/secrets.json。');
     return;
   }

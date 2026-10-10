@@ -35,8 +35,8 @@ export async function GET(request: NextRequest) {
       }
     }, {
       headers: {
-        // 照片列表缓存 30 秒
-        'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=120',
+        // Family data must never be stored in shared CDN caches.
+        'Cache-Control': 'private, no-store',
       },
     })
   } catch (error) {

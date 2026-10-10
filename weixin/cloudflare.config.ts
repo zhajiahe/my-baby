@@ -13,6 +13,13 @@ export default defineConfig({
       WEIXIN_ADMIN_TOKEN: bindings.secret(),
       WEIXIN_BOT_TOKEN: bindings.secret(),
       OPENROUTER_MODEL: bindings.text('meta/muse-spark-1.3-contributor'),
+      // Remains bridge-only until phase A and business deployment are accepted.
+      AGENT_MODE: bindings.text('bridge'),
+      AGENT_WRITES_ENABLED: bindings.text('false'),
+      AGENT_TIME_ZONE: bindings.text('Asia/Shanghai'),
+      MYBABY_API_ORIGIN: bindings.text(''),
+      OPENROUTER_API_KEY: bindings.secret(),
+      MYBABY_AGENT_TOKEN: bindings.secret(),
     },
     exports: { WeixinSession: exports.durableObject({ storage: 'sqlite' }) },
     triggers: [triggers.queue({ name: 'mybaby-inbox', deadLetterQueue: 'mybaby-inbox-dlq',

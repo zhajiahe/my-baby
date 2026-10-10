@@ -82,6 +82,8 @@ npm run dev
 
 📖 **详细开发和部署指南请参考 [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)**
 
+📋 **微信 ClawBot：[Cloudflare 实施计划](./docs/WEIXIN_CLAWBOT_PLAN.md) · [Worker 操作指南](./weixin/README.md) · [核验记录](./docs/WEIXIN_CLAWBOT_VALIDATION.md)**（阶段 A 基础设施已部署，微信扫码与收发验收待完成）
+
 ## 📝 可用脚本
 
 - `npm run dev` - 启动开发服务器

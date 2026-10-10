@@ -1,0 +1,3 @@
+# Local development only. Never commit actual secrets.
+WEIXIN_ADMIN_TOKEN="replace-with-at-least-32-random-characters"
+WEIXIN_BOT_TOKEN="set-after-weixin-qr-login"

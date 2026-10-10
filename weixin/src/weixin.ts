@@ -32,35 +32,65 @@ function headers(post: boolean, token?: string): Record<string, string> {
   return h;
 }
 
+// Map transport diagnostics to a fixed vocabulary; never log raw errors,
+// which may embed the credential-bearing request URL or headers.
+export function transportCategory(error: unknown): string {
+  const message = error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
+    ? error.message : '';
+  if (/network connection lost|connection reset|ECONNRESET/i.test(message)) return 'network_connection_lost';
+  if (/TLS|SSL|certificate/i.test(message)) return 'network_tls';
+  if (/DNS|resolve host|ENOTFOUND|EAI_AGAIN/i.test(message)) return 'network_dns';
+  if (/invalid|unsupported|header|not a function/i.test(message)) return 'network_request_invalid';
+  if (/fetch failed/i.test(message)) return 'network_fetch_failed';
+  return 'network';
+}
+
+// Some deployed compatibility dates do not implement AbortSignal.any even
+// when the newest workers-types declares it. Use portable event composition.
+function combineSignals(timeout: AbortSignal, external?: AbortSignal): { signal: AbortSignal; dispose: () => void } {
+  if (!external) return { signal: timeout, dispose: () => {} };
+  const controller = new AbortController();
+  const onTimeout = () => controller.abort(timeout.reason);
+  const onExternal = () => controller.abort(external.reason);
+  if (timeout.aborted) onTimeout(); else timeout.addEventListener('abort', onTimeout, { once: true });
+  if (external.aborted) onExternal(); else external.addEventListener('abort', onExternal, { once: true });
+  return { signal: controller.signal, dispose: () => {
+    timeout.removeEventListener('abort', onTimeout); external.removeEventListener('abort', onExternal);
+  } };
+}
+
 export async function ilinkRequest(base: string, path: string, options: {
   body?: unknown; token?: string; timeoutMs?: number; signal?: AbortSignal;
 } = {}): Promise<Record<string, unknown>> {
   const post = options.body !== undefined;
   const timeout = AbortSignal.timeout(options.timeoutMs ?? 15_000);
-  let response: Response;
+  const joined = combineSignals(timeout, options.signal);
   try {
-    response = await fetch(`${trustedBaseUrl(base)}/${path}`, {
-      method: post ? 'POST' : 'GET', headers: headers(post, options.token),
-      body: post ? JSON.stringify(options.body) : undefined,
-      redirect: 'error', signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
-    });
-  } catch {
-    throw new ILinkError(options.signal?.aborted ? 'cancelled' : timeout.aborted ? 'timeout' : 'network', true, true);
-  }
-  if (!response.ok) {
-    await response.body?.cancel();
-    if (response.status === 401 || response.status === 403) throw new ILinkError('auth_expired', false);
-    throw new ILinkError(`http_${response.status}`, response.status === 429 || response.status >= 500, response.status >= 500);
-  }
-  let data: unknown;
-  try { data = await response.json(); } catch { throw new ILinkError('invalid_json', true, true); }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ILinkError('invalid_response', true, true);
-  const result = data as Record<string, unknown>;
-  if (result.ret === -14 || result.errcode === -14) throw new ILinkError('auth_expired', false);
-  for (const code of [result.ret, result.errcode]) {
-    if (code !== undefined && code !== 0) throw new ILinkError('protocol_rejected', false);
-  }
-  return result;
+    let response: Response;
+    try {
+      response = await fetch(`${trustedBaseUrl(base)}/${path}`, {
+        method: post ? 'POST' : 'GET', headers: headers(post, options.token),
+        body: post ? JSON.stringify(options.body) : undefined,
+        redirect: 'manual', signal: joined.signal,
+      });
+    } catch (error) {
+      throw new ILinkError(options.signal?.aborted ? 'cancelled' : timeout.aborted ? 'timeout' : transportCategory(error), true, true);
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      if (response.status === 401 || response.status === 403) throw new ILinkError('auth_expired', false);
+      throw new ILinkError(`http_${response.status}`, response.status === 429 || response.status >= 500, response.status >= 500);
+    }
+    let data: unknown;
+    try { data = await response.json(); } catch { throw new ILinkError('invalid_json', true, true); }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ILinkError('invalid_response', true, true);
+    const result = data as Record<string, unknown>;
+    if (result.ret === -14 || result.errcode === -14) throw new ILinkError('auth_expired', false);
+    for (const code of [result.ret, result.errcode]) {
+      if (code !== undefined && code !== 0) throw new ILinkError('protocol_rejected', false);
+    }
+    return result;
+  } finally { joined.dispose(); }
 }
 
 const baseInfo = () => ({ channel_version: CHANNEL_VERSION, bot_agent: 'MyBaby/0.1.0' });
@@ -101,25 +131,42 @@ export interface IncomingText {
   messageId: string; userId: string; text: string; contextToken: string; receivedAt: number;
 }
 
-export function incomingText(value: unknown, botId: string, allowed: string[]): IncomingText | null {
-  if (!value || typeof value !== 'object') return null;
+// Fixed reason codes provide reception diagnostics without storing sender IDs,
+// message text or context credentials for rejected messages.
+export function incomingTextRejection(value: unknown, botId: string, allowed: string[]): string | null {
+  if (!value || typeof value !== 'object') return 'invalid_message';
   const m = value as Record<string, unknown>;
-  if (m.message_type !== 1 || m.message_state !== 2 || m.group_id
-    || typeof m.from_user_id !== 'string' || !allowed.includes(m.from_user_id)
-    || m.from_user_id === botId || (m.to_user_id && m.to_user_id !== botId)
-    || typeof m.context_token !== 'string' || !m.context_token
-    || !Array.isArray(m.item_list)) return null;
+  if (m.message_type !== 1) return 'not_user_message';
+  // NEW (0) and omitted state are valid inbound text. FINISH (2) is the
+  // outbound bot convention, not an inbound requirement. Ignore streaming (1).
+  if (m.message_state !== undefined && m.message_state !== 0 && m.message_state !== 2) return 'incomplete_state';
+  if (m.group_id) return 'unsupported_group';
+  if (typeof m.from_user_id !== 'string' || !allowed.includes(m.from_user_id)) return 'unauthorized_sender';
+  if (m.from_user_id === botId) return 'self_message';
+  if (m.to_user_id && m.to_user_id !== botId) return 'recipient_mismatch';
+  if (typeof m.context_token !== 'string' || !m.context_token) return 'missing_context';
+  if (!Array.isArray(m.item_list)) return 'invalid_items';
   const id = m.message_id;
-  // Fail closed on unsafe numeric IDs rather than deduplicating rounded values.
   if (!(typeof id === 'number' && Number.isSafeInteger(id) && id >= 0)
-    && !(typeof id === 'string' && /^\d{1,30}$/.test(id))) return null;
-  const texts: string[] = [];
-  for (const item of m.item_list) {
-    if (!item || typeof item !== 'object' || item.type !== 1) continue;
-    if (typeof item.text_item?.text === 'string') texts.push(item.text_item.text);
-  }
-  const text = texts.join('\n').trim();
-  if (!text || text.length > 8_000 || m.context_token.length > 8_000) return null;
+    && !(typeof id === 'string' && /^\d{1,30}$/.test(id))) return 'invalid_message_id';
+  const text = textItems(m.item_list);
+  if (!text) return 'non_text_message';
+  if (text.length > 8_000 || m.context_token.length > 8_000) return 'message_too_large';
+  return null;
+}
+
+function textItems(items: unknown[]): string {
+  return items.flatMap(item => {
+    const value = item as { type?: number; text_item?: { text?: unknown } } | null;
+    return value?.type === 1 && typeof value.text_item?.text === 'string' ? [value.text_item.text] : [];
+  }).join('\n').trim();
+}
+
+export function incomingText(value: unknown, botId: string, allowed: string[]): IncomingText | null {
+  if (incomingTextRejection(value, botId, allowed)) return null;
+  const m = value as { message_id: string | number; from_user_id: string; context_token: string; item_list: unknown[]; create_time_ms?: number };
+  const id = m.message_id;
+  const text = textItems(m.item_list);
   const receivedAt = typeof m.create_time_ms === 'number' && Number.isSafeInteger(m.create_time_ms)
     && m.create_time_ms > 0 && m.create_time_ms <= Date.now() + 60_000 ? m.create_time_ms : Date.now();
   return { messageId: String(id), userId: m.from_user_id, text, contextToken: m.context_token, receivedAt };

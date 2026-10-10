@@ -1,5 +1,5 @@
 import { authorized, json, readJson } from './http.js';
-import { getUpdates, sendText, incomingText, eventId, trustedBaseUrl, ILinkError } from './weixin.js';
+import { getUpdates, sendText, incomingText, incomingTextRejection, eventId, trustedBaseUrl, ILinkError } from './weixin.js';
 import { isInboxEvent, type Env, type SessionConfig, type StoredEvent } from './types.js';
 import { prepareAgentReply, type AgentCheckpoint } from './agent-run.js';
 import { AgentError } from './agent.js';
@@ -112,10 +112,11 @@ export class WeixinSession {
     const c = this.config();
     const counts = Object.fromEntries(Array.from(this.ctx.storage.sql.exec<{ state: string; count: number }>(
       'SELECT state, COUNT(*) AS count FROM events GROUP BY state')).map(row => [row.state, row.count]));
-    return json({ state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
+    return json({ adapterVersion: '0.1.1', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
       lastPollAt: c?.lastPollAt ?? null, lastError: c?.lastError ?? null,
       failures: c?.failures ?? 0, cursorSaved: Boolean(c?.cursor),
-      nextAlarmAt: await this.ctx.storage.getAlarm(), events: counts });
+      nextAlarmAt: await this.ctx.storage.getAlarm(), events: counts,
+      reception: this.ctx.storage.kv.get('reception') ?? { received: 0, accepted: 0, rejected: {} } });
   }
 
   private async flush(generation: number): Promise<void> {
@@ -145,13 +146,20 @@ export class WeixinSession {
       const result = await getUpdates(c.apiBaseUrl, this.env.WEIXIN_BOT_TOKEN,
         c.cursor, c.pollTimeoutMs, controller.signal);
       const messages: Array<{ id: string; messageId: string; userId: string; text: string; contextToken: string; receivedAt: number }> = [];
+      const reception = this.ctx.storage.kv.get<{ received: number; accepted: number; rejected: Record<string, number> }>('reception')
+        ?? { received: 0, accepted: 0, rejected: {} };
       for (const raw of result.msgs) {
+        reception.received++;
+        const reason = incomingTextRejection(raw, c.botId, c.allowedUserIds);
+        if (reason) { reception.rejected[reason] = (reception.rejected[reason] ?? 0) + 1; continue; }
+        reception.accepted++;
         const m = incomingText(raw, c.botId, c.allowedUserIds);
         if (m) messages.push({ ...m, id: await eventId(c.botId, m.messageId) });
       }
       const live = this.current(generation);
       if (!live || controller.signal.aborted) return; // Pause/rebind invalidates in-flight response.
       this.ctx.storage.transactionSync(() => {
+        this.ctx.storage.kv.put('reception', reception);
         for (const m of messages) {
           this.ctx.storage.sql.exec(`INSERT OR IGNORE INTO events
             (id,generation,user_id,text,context_token,received_at,message_id) VALUES (?,?,?,?,?,?,?)`,

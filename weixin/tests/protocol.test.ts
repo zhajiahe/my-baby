@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { incomingText, trustedBaseUrl, eventId, getUpdates, sendText, ILinkError } from '../src/weixin.js';
+import { incomingText, incomingTextRejection, transportCategory, trustedBaseUrl, eventId, getUpdates, sendText, ILinkError } from '../src/weixin.js';
 import { authorized, readJson } from '../src/http.js';
 import { DEFAULT_MODEL, isInboxEvent } from '../src/types.js';
 
@@ -24,6 +24,49 @@ test('text validation rejects strangers, own messages, incomplete, group and uns
   for (const change of [{ from_user_id: 'stranger' }, { message_type: 2 }, { message_state: 1 },
     { group_id: 'group' }, { to_user_id: 'other' }, { context_token: '' }, { message_id: Number.MAX_SAFE_INTEGER + 1 },
     { item_list: [{ type: 2 }] }]) assert.equal(incomingText({ ...message, ...change }, 'bot', ['allowed']), null);
+});
+
+test('inbound NEW and omitted states are accepted; rejection diagnostics contain only reason codes', () => {
+  for (const state of [0, undefined, 2]) {
+    assert.equal(incomingText({ ...message, message_state: state }, 'bot', ['allowed'])?.messageId, '123');
+  }
+  assert.equal(incomingTextRejection({ ...message, message_state: 1 }, 'bot', ['allowed']), 'incomplete_state');
+  assert.equal(incomingTextRejection({ ...message, from_user_id: 'private-stranger' }, 'bot', ['allowed']), 'unauthorized_sender');
+  assert.equal(incomingTextRejection({ ...message, to_user_id: 'other' }, 'bot', ['allowed']), 'recipient_mismatch');
+  assert.equal(incomingTextRejection({ ...message, message_id: Number.MAX_SAFE_INTEGER + 1 }, 'bot', ['allowed']), 'invalid_message_id');
+});
+
+test('portable signal composition does not require AbortSignal.any', async t => {
+  t.mock.method(AbortSignal, 'any', () => { throw new Error('not supported'); });
+  const external = new AbortController();
+  t.mock.method(globalThis, 'fetch', async (_url: string, options: RequestInit) => {
+    assert.ok(options.signal);
+    assert.notEqual(options.signal, external.signal);
+    return Response.json({ ret: 0, msgs: [] });
+  });
+  await getUpdates('https://ilinkai.weixin.qq.com', 'synthetic-token', '', 1000, external.signal);
+});
+
+test('external cancellation remains classified as cancelled', async t => {
+  const external = new AbortController();
+  t.mock.method(globalThis, 'fetch', (_url: string, options: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    options.signal?.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+  }));
+  const pending = getUpdates('https://ilinkai.weixin.qq.com', 'synthetic-token', '', 1000, external.signal);
+  external.abort();
+  await assert.rejects(pending, (e: unknown) => e instanceof ILinkError && e.category === 'cancelled');
+});
+
+test('redirect responses fail closed and transport reasons never contain raw errors', async t => {
+  t.mock.method(globalThis, 'fetch', async (_url: string, options: RequestInit) => {
+    assert.equal(options.redirect, 'manual');
+    return Response.redirect('https://evil.invalid', 302);
+  });
+  await assert.rejects(getUpdates('https://ilinkai.weixin.qq.com', 'synthetic-token', '', 1000),
+    (e: unknown) => e instanceof ILinkError && e.category === 'http_302' && !e.retryable);
+  assert.equal(transportCategory(new Error('SSL failure synthetic-private-token')), 'network_tls');
+  assert.equal(transportCategory(new Error('unrecognized synthetic-private-token')), 'network');
+  assert.equal(transportCategory({ message: 'Network connection lost' }), 'network_connection_lost');
 });
 
 test('stable ID scoped to bot; queue holds only references; configured future model', async () => {
@@ -56,7 +99,7 @@ test('getUpdates and sendText use actual wire fields and no credential redirects
   assert.equal(result.timeoutMs, 40_000);
   assert.equal(JSON.parse(calls[0].options.body as string).get_updates_buf, 'previous');
   assert.equal((calls[0].options.headers as Record<string, string>).Authorization, 'Bearer secret-bot');
-  assert.equal(calls[0].options.redirect, 'error');
+  assert.equal(calls[0].options.redirect, 'manual');
   await sendText('https://ilinkai.weixin.qq.com', 'secret-bot', 'allowed', 'context', 'client-stable', 'reply');
   const send = JSON.parse(calls[1].options.body as string);
   assert.equal(send.msg.context_token, 'context');

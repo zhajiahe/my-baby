@@ -109,6 +109,11 @@ test('unauthorized senders and bot messages never enqueue; admin endpoints are p
   assert.equal((await h.call('bind', {})).status, 409);
   const result = await (await h.call('status')).text();
   assert.ok(!result.includes('bot-secret')); assert.ok(!result.includes('allowed'));
+  assert.deepEqual(JSON.parse(result).reception, {
+    received: 2, accepted: 0, rejected: { unauthorized_sender: 1, not_user_message: 1 },
+  });
+  h.restart();
+  assert.deepEqual((await (await h.call('status')).json() as { reception: unknown }).reception, JSON.parse(result).reception);
 });
 
 test('expired credentials stop alarms; transient HTTP failure backs off', async t => {

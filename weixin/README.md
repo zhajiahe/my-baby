@@ -8,8 +8,8 @@
 
 - 已部署：`https://mybaby-weixin.zhajiahe1994.workers.dev`。
 - 已创建 SQLite DO、`mybaby-inbox`、`mybaby-inbox-dlq` 与 Queue 消费者。
-- 已验证云端 `/health` 返回 200、未授权管理接口返回 401、授权 DO 状态为 `unbound`。
-- 尚未扫码绑定、尚未实测微信收发、未完成 24/72 小时连续运行验收。
+- 已验证 `/health` 200、未授权管理接口 401；2026-10-11 北京时间已扫码绑定，generation 1，观察到云端 `running`、游标保存且最近轮询无错误。
+- 用户发送“桥接测试 001”后尚未收到回复，文字收发/Queue 消费验收仍未通过；新增接收计数的线上生效及 24/72 小时观测仍待确认。详见[核验记录](../docs/WEIXIN_CLAWBOT_VALIDATION.md#7-扫码接入进展2026-10-11北京时间)。
 - 详见 [协议核验与验收记录](../docs/WEIXIN_CLAWBOT_VALIDATION.md) 和 [整体实施计划](../docs/WEIXIN_CLAWBOT_PLAN.md)。
 
 ## 开发与检查

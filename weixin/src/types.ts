@@ -14,7 +14,6 @@ export interface Env {
   AGENT_WRITES_ENABLED?: string;
   AGENT_TIME_ZONE?: string;
   // ASR model override for voice understanding.
-  OPENROUTER_ASR_MODEL?: string;
   // Structural probe is off unless a deploy explicitly enables it. It records
   // protocol field paths only, never values.
   MEDIA_PROBE_ENABLED?: string;

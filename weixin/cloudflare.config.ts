@@ -19,6 +19,9 @@ export default defineConfig({
       AGENT_WRITES_ENABLED: bindings.text(process.env.MYBABY_AGENT_WRITES_ENABLED === 'true' ? 'true' : 'false'),
       AGENT_TIME_ZONE: bindings.text('Asia/Shanghai'),
       MYBABY_API_ORIGIN: bindings.text(process.env.MYBABY_AGENT_ORIGIN || ''),
+      // Records protocol field paths only (never values) for unverified media
+      // payloads. Off unless a deploy explicitly enables it.
+      MEDIA_PROBE_ENABLED: bindings.text(process.env.MYBABY_MEDIA_PROBE === 'true' ? 'true' : 'false'),
       OPENROUTER_API_KEY: bindings.secret(),
       MYBABY_AGENT_TOKEN: bindings.secret(),
     },

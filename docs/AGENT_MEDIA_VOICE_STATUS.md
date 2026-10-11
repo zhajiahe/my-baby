@@ -77,3 +77,38 @@ MEDIA_PROBE_ENABLED=true · MYBABY_API_ORIGIN=<隔离测试 Worker>
 3. **grant 会被共享测试 Worker 的并发部署清空**：环境固有问题，测试前需核对。
 4. 图片归档的**维护期孤儿清理**未在冻结窗口执行。
 5. **生产切换与生产验收未做**：本文所有结论仅限隔离环境。
+
+## 7. 视频/图片封面不显示的根因与修法（交由媒体侧处理）
+
+**现象**：相册里视频卡片没有封面（空白）；图片卡片看似正常但也不是真实照片。
+
+**根因（已实测，非推测）**：
+
+| 测试 | 结果 |
+| --- | --- |
+| `next/image` optimizer 取 `/api/media/...`（匿名） | `400 Invalid image optimization parameters` |
+| `next/image` optimizer 取同一路径（带家庭会话） | 同样 `400` |
+| **直接**取同一路径（带家庭会话） | **`200`，`image/jpeg`** |
+| 直接取（匿名） | `401`（私有路径，符合设计） |
+| 视频 `thumbnailUrl` 非空比例 | **50/50** |
+| 封面对象内容 | 7–10KB 合法 JPEG |
+
+私有媒体必须由**浏览器带家庭 Cookie 直取**。`next/image` 会把它交给优化器，而优化器直接拒收（`400`），因此三处媒体渲染全部落入 `onError`：
+
+- 图片卡片：`onError` 显示占位图 → 看似“没事”，实际不是真实照片
+- 视频卡片：`onError` 执行 `display='none'` → **彻底空白**，且只留一条 console 错误——最难发现的失败模式
+
+**修法（`src/app/components/PhotoGallery.tsx`）**：
+
+1. 三处私有媒体渲染（弹窗图片、列表图片、视频封面）从 `next/image` 改为原生 `<img>`，浏览器即带 Cookie 直取；移除因此不再使用的 `next/image` import。
+2. 视频封面的 `onError` 改为**回落可见占位图**，而不再隐藏元素：
+
+```tsx
+onError={(e) => { e.currentTarget.src = '/placeholder-video-thumb.svg'; }}
+```
+
+3. `public/placeholder-video-thumb.svg` 已存在且线上可访（`200`），可直接作为回落。
+
+**为何本仓未提交该修复**：同文件当时还包含媒体侧未提交的改动（弹窗 `<video>` 换为新组件），而该改动 import 了未跟踪的 `src/app/components/PrivateVideo.tsx`。单独提交这个文件会让干净检出的构建失败；一起提交则会把未完成的实现归到他人名下。可直接取用的修复版本在工作区 `.migration/rc/PhotoGallery.fixed.tsx`（0600，私有）。
+
+**验证标准**：重新部署后，列表卡片显示**真实照片/视频封面**（不是占位图），且视频卡片在回落路径下不会出现空白。

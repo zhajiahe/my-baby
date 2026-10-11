@@ -4,6 +4,8 @@ import { isInboxEvent, type Env, type SessionConfig, type StoredEvent } from './
 import { prepareAgentReply, type AgentCheckpoint } from './agent-run.js';
 import { AgentError } from './agent.js';
 import { failureReply, formatResults } from './tools.js';
+import { classifyMediaItems } from './media.js';
+import { recordStructure, type StructureSample } from './probe.js';
 
 const RETENTION_MS = 30 * 86_400_000;
 const LEASE_MS = 60_000;
@@ -175,13 +177,19 @@ export class WeixinSession {
       const result = await getUpdates(c.apiBaseUrl, this.env.WEIXIN_BOT_TOKEN,
         c.cursor, c.pollTimeoutMs, controller.signal, this.testTransport());
       const messages: Array<{ id: string; messageId: string; userId: string; text: string; contextToken: string; receivedAt: number }> = [];
-      const reception = this.ctx.storage.kv.get<{ received: number; accepted: number; rejected: Record<string, number> }>('reception')
+      const reception = this.ctx.storage.kv.get<{ received: number; accepted: number; rejected: Record<string, number>; structure?: StructureSample[] }>('reception')
         ?? { received: 0, accepted: 0, rejected: {} };
       for (const raw of result.msgs) {
         reception.received++;
         const reason = incomingTextRejection(raw, c.botId, c.allowedUserIds);
         if (reason) {
           reception.rejected[reason] = (reception.rejected[reason] ?? 0) + 1;
+          // Record field paths for unverified media payloads while the probe is
+          // explicitly enabled. Values are never read or stored.
+          if (this.env.MEDIA_PROBE_ENABLED === 'true' && (reason === 'voice_message' || reason === 'image_message')) {
+            const classified = classifyMediaItems((raw as { item_list?: unknown[] } | null)?.item_list ?? []);
+            if ('media' in classified) reception.structure = recordStructure(reception.structure, classified.media.kind, classified.media.item);
+          }
           // An otherwise authorized text with an unusable ID must not be
           // acknowledged by advancing the cursor: retain it for recovery.
           if (reason === 'invalid_message_id') {

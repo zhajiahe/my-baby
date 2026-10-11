@@ -45,7 +45,23 @@
 
 以后重测的判据：出现 `voice_message`/`image_message` → 到达；出现 `unsupported_media_type` → 类型号与协议假设不符，需改设计；`non_text_message` 增长 → 说明线上跑的仍是旧代码。
 
-### 2.2 再拿真实 payload 结构（仍未做）
+### 2.2 结构探针已实现（默认关闭，待部署后取样）
+
+**为什么必须先知道结构**：媒体的 CDN 引用与 AES key **只出现在 `getupdates` 响应里**，之后不再有机会拿到。所以接入事件流前必须能从 payload 可靠抽出引用；否则只剩两个坏选择：丢掉照片，或把整个未验证 payload 持久化进 DO（存储膨胀 + 敏感数据落盘）。这是“先拿结构”是硬前置的真正原因。
+
+`weixin/src/probe.ts` 已实现结构探针（有测试）：
+
+- **只记录字段路径与值类型，绝不记录值**：如 `voice_item.media.aeskey:string`、`image_item.url:string(empty)`、`voice_item.duration:number`。
+- 非标识符形状的 key 一律换成占位符，所以**值不可能通过 key 位置泄露**。
+- 深度、路径数、数组采样数都有上限；同一形状重复上报不占名额，样本上限 3 条。
+- 字符串只区分非空/空，不记长度或前缀。
+- 测试断言密钥、CDN 域名、URL 参数、context_token、格式名、时长、字节数等具体值都不会出现在输出里。
+
+启用：部署时设 `MEDIA_PROBE_ENABLED=true`，结果写入 DO 的 `reception.structure`，用 `cd weixin && npm run session -- status` 读取。**默认关闭时不改变任何行为。**
+
+拿到结构后，剩下的是：把 `VoiceSource` 换成真实下载 + AES 解密（照官方客户端的 AES-128 实现，不自己造），并把媒体事件接入 DO 事件流。
+
+### 2.2b 原步骤（保留供参考）
 
 临时加一行脱敏日志（只打 `type` 和字段名，不打正文/key），拿到真实结构：
 

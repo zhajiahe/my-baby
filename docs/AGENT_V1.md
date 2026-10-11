@@ -163,3 +163,38 @@ npm run test:postgres
 成功后 pg_ctl 停止专属临时实例并删除数据；失败保留 0700 私有诊断目录，输出不含连接 URL、密码或 guard。SIGINT/SIGTERM 尝试停止子命令并清理自己启动的实例，不操作 Homebrew 常驻服务。此次运行实际确认 **10/10 通过、实例停止、数据删除**；根单元测试 9/9、`tsc --noEmit` 通过；显式覆盖为无效合成数据库 URL 的 Next.js 生产构建通过；直接运行集成测试文件（未由临时库运行器提供 guard）已实际确认在客户端构造前拒绝。
 
 这验证真实 PostgreSQL 事务，不表示已应用生产 SQL、配置真实业务授权、完成 Neon 连接池联调或上线 Agent。
+
+## 8. 相册读取与语音理解（2026-10-11）
+
+Agent 从“成长记录”扩展到“相册 + 语音”的实现状态。**已实现的能力有真实云端证据；未实现的明确标注，不用“代码写完”冒充“验收通过”。**
+
+### 8.1 相册只读查询（已实现，有真实云端证据）
+
+- `list_media_items` / `get_album_summary`，见第 2 节工具表。
+- 三条硬约束：
+  1. **只读**：不经过写入开关、不产生 receipt、不做任何变更（测试断言读操作不写 `agent_operations`、不改数据）。
+  2. **永不返回媒体链接**：`media_items.url` 是 `/api/media/...` 私有路径，需要家庭 Cookie 才能访问，发到微信里既打不开又会泄露路径。store 只 `select` 日期/类型/格式/标题；测试断言回复文本不含 `/api/media` 与 `http`。
+  3. **求和与按月计数在 store 完成**（D1 与 Prisma 两套实现都有），模型不做算术，从根上避免“模型算错数字”。
+- 真实云端证据（隔离 Worker + 真实 D1，9 条媒体）：`get_album_summary` → 200，total 9 / images 0 / videos 9 / months `[{2026-10: 9}]`，与 D1 一致；`list_media_items(limit=3)` → 200 且字段恰为 `date/mediaType/format/title`、无私有链接；`mediaType=VIDEO` → 9 条全为视频；`limit=31` 与带参数的 `get_album_summary` → 400。
+- 测试：契约（越界 limit、非法 mediaType、非法日期、起止倒置、多余字段含 `url`/`babyId` 全部拒绝）、服务分发、回复模板，以及**真实 SQLite** 上的跨月聚合与区间过滤。
+
+### 8.2 微信语音理解（已实现，下载环节明确未实现）
+
+- `weixin/src/asr.ts`：转写客户端。固定端点、`redirect: 'manual'`、45s 截止、容器白名单；空音频、>5MB、>60s 在**发请求前**拒绝；错误区分为可重试（429/5xx）与终态（4xx，重发同样字节无意义）。
+- `weixin/src/media.ts`：媒体分类 + 可注入的 `VoiceSource` 下载接口。
+- **转写文本走与打字完全相同的校验管线**（单位、日期、越权均由服务端再校验），回复前加 `（语音转写）` 标记；短转写会回显原文，便于家人发现误听。
+- **未实现且不假装实现**：真实 `voice_item` 的下载与 AES-128 解密。结构未经真实样本确认，因此实现为返回明确错误的 stub，而不是猜 payload。测试用注入的合成 source 覆盖了下游全链路。
+- 失败话术为固定句子，测试断言不含 `http`/`silk`/`AES`/`key` 等内部词，且不会静默丢弃。
+- **未接入 DO 事件流**：在下载可用前接上去只会回“读不了语音”，因此不做。
+
+### 8.3 接收诊断已细分（可直接用于 spike）
+
+原本所有非文本消息统一记 `non_text_message`。现拆为 `voice_message`、`image_message`、`unsupported_media_type`、`unsupported_media_combination`，且**不改变任何处理行为**。
+
+这让 `AGENT_MEDIA_VOICE_PLAN.md` 一直等待的 spike 变成零风险操作：发一条语音后看 `reception.rejected` 是否出现 `voice_message`，即可确认语音是否真的到达 Bot。
+
+### 8.4 本轮测试统计（历史数字不回改）
+
+- 根项目 `npm run test:unit`：**27/27**；`npm run typecheck` 通过；`npm run lint` **0 errors**。
+- `weixin`：`npm test` **56/56**；`npm run typecheck` 通过。
+- 前文各节的用例数（9、10、30、47 等）是当时的历史快照。

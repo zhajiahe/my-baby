@@ -1,10 +1,10 @@
 import {test}from'node:test';import assert from'node:assert/strict';
 import{normalizeMediaFile,browserVideo}from'../src/lib/media-client';import{videoMetadata,mediaFetch}from'../src/lib/media-metadata';
-test('Safari empty MIME is normalized and unsupported MOV never reports conversion success',async()=>{
- const mp4=normalizeMediaFile(new File(['synthetic'],'camera.mp4',{type:''}));assert.equal(mp4.type,'video/mp4');assert.equal(await browserVideo(mp4),mp4);
+test('Safari empty MIME is normalized and explicitly disabled conversion fails honestly',async()=>{
+ const mp4=normalizeMediaFile(new File(['synthetic'],'camera.mp4',{type:''}));assert.equal(mp4.type,'video/mp4');
  assert.equal(normalizeMediaFile(new File(['synthetic'],'camera.HEIC')).type,'image/heic');
- const prior=process.env.NEXT_PUBLIC_MEDIA_WASM_ENABLED;delete process.env.NEXT_PUBLIC_MEDIA_WASM_ENABLED;
- try{await assert.rejects(browserVideo(normalizeMediaFile(new File(['synthetic'],'camera.MOV'))),/MP4/);}finally{if(prior!==undefined)process.env.NEXT_PUBLIC_MEDIA_WASM_ENABLED=prior;}
+ const prior=process.env.NEXT_PUBLIC_MEDIA_WASM_ENABLED;process.env.NEXT_PUBLIC_MEDIA_WASM_ENABLED='false';
+ try{await assert.rejects(browserVideo(normalizeMediaFile(new File(['synthetic'],'camera.MOV'))),/转换未开启/);}finally{if(prior!==undefined)process.env.NEXT_PUBLIC_MEDIA_WASM_ENABLED=prior;else delete process.env.NEXT_PUBLIC_MEDIA_WASM_ENABLED;}
 });
 test('thumbnail encoder stall times out and releases attached video/object URL',async()=>{
  const prior=globalThis.document;let removed=false;let revoked=false;const revoke=URL.revokeObjectURL;

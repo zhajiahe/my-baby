@@ -117,9 +117,12 @@ test('HEIC sample decodes to real JPEG and displays',async({page})=>{
  expect((await image.body()).subarray(0,2).toString('hex')).toBe('ffd8');
  const img=page.locator(`img[src$="${row.url}"]`).first();await img.scrollIntoViewIfNeeded();await expect(img).toBeVisible();await expect.poll(()=>img.evaluate((i:HTMLImageElement)=>i.naturalWidth)).toBeGreaterThan(0);
 });
-test('unsupported MOV remains explicit No-Go, not false success',async({page})=>{
+test('corrupt MOV fails without saving a false success',async({page})=>{
+ test.setTimeout(90000);
+ let saves=0;page.on('request',r=>{if(r.url().endsWith('/api/photos')&&r.method()==='POST')saves++;});
  await gallery(page);await page.locator('input[type=file]').setInputFiles({name:'unsupported.mov',mimeType:'video/quicktime',buffer:Buffer.from('synthetic-invalid-mov')});
- await page.getByRole('button',{name:'上传 1 个文件',exact:true}).click();await expect(page.getByText(/浏览器转码尚未完成兼容性验收/)).toBeVisible();
+ await page.getByRole('button',{name:'上传 1 个文件',exact:true}).click();await expect(page.locator('p').filter({hasText:/✗/})).toBeVisible({timeout:75000});
+ await expect(page.getByRole('button',{name:'上传 1 个文件',exact:true})).toBeEnabled();expect(saves).toBe(0);
 });
 test('H264 MP4 passthrough keeps exact bytes, duration and playable modal',async({page})=>{
  await gallery(page);await page.locator('input[type=file]').setInputFiles('.migration/fixtures/flower.mp4');

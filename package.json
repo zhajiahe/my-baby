@@ -22,6 +22,8 @@
     "test:cloudflare": "tsx scripts/cloudflare-http-smoke.ts",
     "test:cloudflare:agent": "tsx scripts/cloudflare-agent-smoke.ts",
     "test:e2e:fixtures": "tsx scripts/prepare-e2e-fixtures.ts",
+    "test:e2e:video-fixtures": "tsx scripts/prepare-video-fixtures.ts",
+    "test:video:offline": "tsx scripts/test-video-offline.ts",
     "test:e2e:seed": "tsx scripts/e2e-seed.ts",
     "test:e2e": "playwright test",
     "deploy:weixin:acceptance": "tsx scripts/weixin-acceptance-deploy.ts",

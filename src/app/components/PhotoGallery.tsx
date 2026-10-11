@@ -71,6 +71,8 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
   const [uploadFiles, setUploadFiles] = useState<UploadFileItem[]>([]);
   const [uploadDate, setUploadDate] = useState(new Date().toISOString().split('T')[0]);
   const [isUploading, setIsUploading] = useState(false);
+  const uploadControllerRef=useRef<AbortController|null>(null);
+  useEffect(()=>()=>uploadControllerRef.current?.abort(),[]);
 
   // 新增：编辑功能状态
   const [isEditing, setIsEditing] = useState(false);
@@ -330,17 +332,18 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
   };
 
   // 辅助函数：处理视频元数据（缩略图 + 时长，只加载一次视频）
-  const processVideoMetadata = async (file: File): Promise<{
+  const processVideoMetadata = async (file: File,signal:AbortSignal): Promise<{
     thumbnail: Blob | null;
     duration: number | null;
   }> => {
-    return videoMetadata(file);
+    return videoMetadata(file,15000,signal);
   };
 
   // 辅助函数：直接上传到 R2（绕过服务器，解决文件大小限制）
   const uploadDirectToR2 = async (
     file: File,
     uploadId: string,
+    signal: AbortSignal,
     onProgress: (progress: number) => void
   ): Promise<{
     url: string;
@@ -352,15 +355,18 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     const isVideo = file.type.startsWith('video/');
     
     // 处理文件（HEIC 转换等）
-    const blob = isVideo ? await browserVideo(file) : (await convertHeicToJpeg(file)).blob;
+    const blob = isVideo ? await browserVideo(file,{signal,onProgress}) : (await convertHeicToJpeg(file)).blob;
+    if(signal.aborted)throw new Error('上传已取消，可重试');
+    if(blob.size>100*1024*1024)throw new Error('转换后文件超过 100MB，请选择较短的视频');
     const processedType = blob.type;
     const processedFile = new File([blob], file.name, { type: processedType });
     
-    const metadata = isVideo ? await processVideoMetadata(processedFile) : null;
+    const metadata = isVideo ? await processVideoMetadata(processedFile,signal) : null;
     onProgress(10);
     
     // 步骤1: 获取预签名 URL
     const urlResponse = await mediaFetch('/api/photos/generate-upload-url', {
+      signal,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -382,6 +388,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     
     // 步骤2: 直接上传到 R2
     const uploadResponse = await mediaFetch(urlData.uploadUrl, {
+      signal,
       method: 'PUT',
       headers: {
         'Content-Type': urlData.contentType,
@@ -408,6 +415,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
       if (thumbnailBlob && urlData.thumbnailUploadUrl) {
         try {
           const thumbResponse = await mediaFetch(urlData.thumbnailUploadUrl, {
+            signal,
             method: 'PUT',
             headers: { 'Content-Type': 'image/jpeg' },
             body: thumbnailBlob,
@@ -434,6 +442,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
 
   // 上传处理 - 直接上传到 R2（更快，无文件大小限制）
   const handleUpload = async () => {
+    if(uploadControllerRef.current)return;
     if (!baby?.id) {
       toast.error('验证失败', '请先创建宝宝信息。');
       return;
@@ -443,11 +452,13 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
       return;
     }
 
+    const controller=new AbortController();uploadControllerRef.current=controller;
     setIsUploading(true);
     const successfulItems: MediaItem[] = [];
 
     // 逐个上传文件
     for (let i = 0; i < uploadFiles.length; i++) {
+      if(controller.signal.aborted)break;
       const item = uploadFiles[i];
       if (item.status === 'success') continue;
       
@@ -458,7 +469,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
 
       try {
         // 直接上传到 R2（绕过服务器）
-        const uploadResult = item.uploadedResult ?? await uploadDirectToR2(item.file, item.id, (progress) => {
+        const uploadResult = item.uploadedResult ?? await uploadDirectToR2(item.file, item.id, controller.signal, (progress) => {
           setUploadFiles(prev => prev.map(f => 
             f.id === item.id ? { ...f, progress } : f
           ));
@@ -483,6 +494,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
         };
 
         const saveResponse = await mediaFetch('/api/photos', {
+          signal:controller.signal,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(mediaDataForDb),
@@ -556,6 +568,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
       toast.success('上传完成', `成功上传 ${successfulItems.length} 个文件`);
     }
 
+    uploadControllerRef.current=null;
     setIsUploading(false);
     
     // 如果全部成功，清空并关闭
@@ -790,7 +803,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
                                 />
                               </div>
                               <p className="text-xs text-teal-600 mt-1">
-                                {item.progress < 50 ? '上传中...' : item.progress < 90 ? '处理中...' : '即将完成...'} {item.progress}%
+                                {item.progress < 10 ? '准备/转换视频...' : item.progress < 70 ? '上传中...' : item.progress < 90 ? '处理中...' : '即将完成...'} {item.progress}%
                               </p>
                             </div>
                           )}
@@ -825,6 +838,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
 
               {/* 上传按钮 */}
               <div className="flex space-x-3 mt-6">
+                {isUploading&&<button onClick={()=>uploadControllerRef.current?.abort()} className="btn-secondary">取消上传</button>}
                 <button
                   onClick={handleUpload}
                   className="btn-primary flex-1"

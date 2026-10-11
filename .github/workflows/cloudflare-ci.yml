@@ -62,6 +62,11 @@ jobs:
       - run: npm run deploy:cloudflare:test -- --without-source-media > .migration/ci-deploy.log 2>&1
       - run: npm run test:e2e:seed > .migration/ci-seed.log 2>&1
       - run: npm run test:e2e:fixtures
+      - name: Generate video test fixtures (never application runtime)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          npm run test:e2e:video-fixtures
       - run: npm run test:e2e
       # No production job, source DATABASE_URL, migration export or source R2 binding.
       # Never upload traces/screenshots/secret-bearing logs, even on failure.

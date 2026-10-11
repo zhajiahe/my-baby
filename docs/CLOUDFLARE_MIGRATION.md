@@ -20,13 +20,15 @@
 - 私有媒体：测试 R2 无公共访问入口；`/api/media/[...key]` 受家庭 Cookie 保护、`private, no-store`、支持 Range，图片不经过匿名 optimizer。现有生产 R2 公共链接仍然存在，未擅自关闭或清缓存。
 - 静态资源 COOP/COEP/CORP 配置在 `public/_headers`；页面 Proxy 也设置隔离头。
 
-## 视频转换的实际状态（生产阻塞项）
+## 视频转换的当前功能范围
 
-原 Gallery 的 R2 直传本身并不进行服务器视频转码。旧 db:push/db:seed/db:reset/db:studio 脚本已移除，防止沿用本机生产 DATABASE_URL 误写源库。默认保留 MP4/WebM 直传；浏览器生成缩略图，无法获取有限时长时保存 null，绝不写 Infinity。
+按用户最新要求，以日常功能验收为主，iPhone 原片必须支持。最新实现与实际证据见 [IPHONE_VIDEO_FUNCTIONAL_REPORT.md](IPHONE_VIDEO_FUNCTIONAL_REPORT.md)，历史的“WASM 默认关闭/MOV 必须手动导出”结论不再代表当前代码。
 
-实现了可选浏览器 FFmpeg WASM，但自动化在触发视频上传/转换后停滞（默认 WebM 路径的后续浏览器断言也超时），根因尚未确定，**尚不能证明视频 UI 全链路、MOV/HEVC 转码或完整跨浏览器行为通过**。默认 `NEXT_PUBLIC_MEDIA_WASM_ENABLED` 不开启，MOV 等需要先在设备导出 MP4，不能宣称与所有旧上传路径功能完全等价。
+现在默认分发约 10.3MB gzip 的浏览器 WASM，MOV/HEVC MP4 自动生成 8-bit H264/AAC、faststart 的播放副本；普通 H264 MP4/WebM 保留透传。保留旋转，HLG/PQ 转 BT709 SDR；播放副本长边最大 1280、30fps，不承诺保留 HDR/电影模式编辑轨道。构建时显式设置 `NEXT_PUBLIC_MEDIA_WASM_ENABLED=false` 可关闭转换。
 
-开启该实验开关需要重新构建：构建时生成约 10.3MB gzip WASM（低于静态资源单文件 25MiB），浏览器解压，不在 Worker 加载核心。输入转换上限 200MB、执行 120 秒，加载有中止超时。默认构建不分发该核心。正式开放前必须完成真实 HEIC、多种 MOV/HEVC/MP4、音轨、旋转、时长、缩略图、移动 Safari/Chrome、取消/失败回收与版权/源代码通知检查。不要把静态隔离头存在当成 WASM 验收证据。
+转换输入上限 200MiB、上传结果上限 100MiB，exec 120s、整体 deadline 210s，支持取消和失败后重试。WASM 不在 Worker 加载；native FFmpeg 仅用于测试样片生成/解码，不属于 Web/Worker runtime。旧危险 db:push/db:seed/db:reset/db:studio 脚本仍移除。
+
+本机真实 Chrome/WASM 对 4 类合成视频与 5 条隔离存量原片转换/播放通过，Chrome iPhone 视口同样通过；**云端完整专项因并行任务冻结环境而中断，真机 Safari 未完成**，不宣称完整 iPhone 验收通过。运营项单独跟踪，不扩大本轮功能门禁。
 
 ## 已记录的验收证据
 
@@ -36,7 +38,7 @@
 - TypeScript 通过。
 - `npm run test:cloudflare`：真实云端登录/注销、匿名 401/重定向、CSRF 403、private/no-store、源 ID、50 条分页、成长/里程碑 CRUD、标签更新、R2 签名直传、字节比对、Range 206、媒体匿名 401、相册批次/编辑/删除、Cookie 不可授权 Agent、无 grants 拒绝。
 - `npm run test:cloudflare:agent`：测试环境临时仅对虚构微信身份授权；八个并发请求 1 次提交 / 7 次回放，payload 和跨工具冲突 409，独立 key 的里程碑成功、读范围与身份限制通过。测试记录/回执清理，grants 与写开关恢复关闭。
-- 浏览器：实际登录、导航、成长日历、表单提交成功；相册读取与上传选择界面加载。**不能据此声称所有 UI 编辑/删除、所有媒体格式和浏览器组合均已通过。** 实验转码自动化停滞已记录，故保持关闭。
+- 早期浏览器证据仅证明登录/导航/表单和相册界面；后续全 UI 回归见 RC 报告，最新视频功能证据见 iPhone 视频报告。历史的转换停滞和默认关闭不是当前实现状态；仍不声称真机 Safari 通过。
 - 测试 R2 的托管 r2.dev 公共访问状态实测为 disabled。
 - 公开客户端资产扫描：独立测试 secrets 不在 JS/JSON/CSS 中。不是完整渗透测试。
 

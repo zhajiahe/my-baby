@@ -1,5 +1,7 @@
 # Cloudflare 发布候选推进报告（2026-10-11）
 
+> 本文件保留上一轮生产门禁与证据。用户随后要求按日常功能验收，并明确 iPhone 原片必须支持；最新视频实现、离线通过和待完成的云端/真机验收见 [IPHONE_VIDEO_FUNCTIONAL_REPORT.md](IPHONE_VIDEO_FUNCTIONAL_REPORT.md)。不再将全部运营事项作为本轮功能门禁。
+
 **结论：No-Go（生产）；隔离验证取得进展，不是生产验收通过。**
 
 开始时实际 HEAD 为 `c303ead`，不是请求中的 `8a887ab`；保留并复用其实现。用户的 `test.txt` 未提交修改未更改。没有操作 Vercel 生产、Neon 生产写入、正式域名或现有微信 Worker。本轮没有重新导出 Neon；测试数据复位使用现有私有快照。

@@ -36,6 +36,9 @@ test('proxy protects original APIs, cookie cannot authorize service API and writ
   process.env.MYBABY_APP_PASSWORD = config.password; process.env.MYBABY_SESSION_SECRET = config.secret
   assert.equal(proxy(new NextRequest('https://test/api/baby')).status, 401)
   assert.equal(proxy(new NextRequest('https://test/api/photos/upload', { method: 'POST' })).status, 401)
+  // Media intake authenticates with the service token in the route, so the proxy
+  // must not demand a family cookie for it.
+  assert.equal(proxy(new NextRequest('https://test/api/agent/media', { method: 'POST' })).status, 200)
   assert.equal(proxy(new NextRequest('https://test/')).status, 307)
   const cookie = `${SESSION_COOKIE}=${createSession(config)}`
   assert.equal(proxy(new NextRequest('https://test/api/baby', { headers: { cookie } })).status, 200)
@@ -45,6 +48,8 @@ test('proxy protects original APIs, cookie cannot authorize service API and writ
   try {
     assert.equal(proxy(new NextRequest('https://test/api/agent/v1',{method:'POST'})).status,503)
     assert.equal(proxy(new NextRequest('https://test/api/photos/generate-upload-url',{method:'POST',headers:{cookie,origin:'https://test'}})).status,503)
+    // The freeze is a business write switch, so channel media intake is blocked too.
+    assert.equal(proxy(new NextRequest('https://test/api/agent/media',{method:'POST'})).status,503)
     assert.equal(proxy(new NextRequest('https://test/api/baby',{headers:{cookie}})).status,200)
     assert.equal(proxy(new NextRequest('https://test/api/auth/logout',{method:'POST'})).status,200)
     // Only the independently token-authenticated cleanup route bypasses business freeze.

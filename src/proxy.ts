@@ -16,7 +16,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.json({error:'writes_frozen'},{status:503,headers:{'Cache-Control':'no-store','Retry-After':'60'}})
   }
   // Agent, operations and temporary migration routes authenticate independent service tokens.
-  if (path === '/login' || path === '/api/auth/login' || path === '/api/auth/logout' || path === '/api/agent/v1' || path === '/api/ops/health' || path === '/api/migration/copy-media' || path === '/api/migration/cleanup-test-media') {
+  if (path === '/login' || path === '/api/auth/login' || path === '/api/auth/logout' || path === '/api/agent/v1' || path === '/api/agent/media' || path === '/api/ops/health' || path === '/api/migration/copy-media' || path === '/api/migration/cleanup-test-media') {
     return isolate(NextResponse.next())
   }
   const config = authConfig()

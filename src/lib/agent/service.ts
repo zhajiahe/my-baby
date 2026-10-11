@@ -4,6 +4,9 @@ import { ContractError, isWrite, resolveGrant, validateRequest, type AgentGrant,
 export interface AgentResult { operation: string; baby: BabySummary; data: Record<string, unknown>; replayed?: boolean }
 export interface ReceiptKey { source: string; botId: string; messageId: string; operationKey: string }
 export interface Receipt { payloadHash: string; result: AgentResult }
+// Optional pre-commit hook. It runs only on the first attempt (never on replay)
+// and is where the channel adapter verifies that referenced stored objects exist.
+export type WriteVerifier = (request: AgentRequest, babyId: string) => Promise<void>
 export interface AgentTransaction {
   findReceipt(key: ReceiptKey): Promise<Receipt | null>
   mutate(request: AgentRequest, babyId: string): Promise<Record<string, unknown>>
@@ -30,7 +33,7 @@ export interface AgentStore {
 }
 
 export async function executeOperation(value: unknown, options: {
-  store: AgentStore; grants?: string; writesEnabled: boolean
+  store: AgentStore; grants?: string; writesEnabled: boolean; verifyWrite?: WriteVerifier
 }): Promise<AgentResult> {
   const request = validateRequest(value)
   const grant: AgentGrant = resolveGrant(request, options.grants)
@@ -51,6 +54,10 @@ export async function executeOperation(value: unknown, options: {
   }
   const existing = await options.store.findReceipt(key)
   if (existing) return replay(existing)
+  // Stored object existence and content are verified exactly once, before the
+  // first commit. Replays must never re-verify, or deleting an object later
+  // would turn a successful write into a permanent failure.
+  if (options.verifyWrite) await options.verifyWrite(request, grant.babyId)
   if (options.store.atomicWrite) {
     const committed = await options.store.atomicWrite(request, grant.babyId, key, payloadHash, baby)
     if (committed.receipt.payloadHash !== payloadHash) throw new ContractError('idempotency_conflict', 409)

@@ -52,6 +52,17 @@ export function prismaStore(db: PrismaClient): AgentStore {
       findReceipt: key => findReceipt(tx, key),
       async mutate(request: AgentRequest, babyId: string) {
         const a = request.args
+        if (request.operation === 'create_media_record') {
+          // The URL is derived server-side; existence and content are checked by
+          // the adapter's pre-commit verifier, not here.
+          const objectKey = String(a.key), format = objectKey.slice(objectKey.lastIndexOf('.') + 1)
+          return plain(await tx.mediaItem.create({ data: { babyId, date: new Date(`${a.date}T00:00:00.000Z`),
+            title: (a.title as string | undefined) ?? '', description: a.description as string | undefined,
+            url: `/api/media/${objectKey}`, mediaType: a.mediaType as string, format,
+            thumbnailUrl: a.thumbnailKey ? `/api/media/${a.thumbnailKey}` : null,
+            duration: a.duration as number | undefined,
+          }, select: { id: true, date: true, mediaType: true, format: true } }))
+        }
         if (request.operation === 'create_growth_record') {
           return plain(await tx.growthRecord.create({ data: { babyId, date: new Date(`${a.date}T00:00:00.000Z`),
             weight: a.weight as number | undefined, height: a.height as number | undefined,

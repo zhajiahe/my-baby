@@ -3,7 +3,10 @@ import {UploadError,uploadIdPattern} from './media-upload';
 export const mediaTypes:Record<string,string>={jpg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp',mp4:'video/mp4',webm:'video/webm'};
 export const MAX_MEDIA_BYTES=100*1024*1024;
 export function mediaKey(url:unknown):string {
- if(typeof url!=='string'||!/^\/api\/media\/uploads\/[0-9a-f-]+(?:-thumb)?\.(jpg|png|gif|webp|mp4|webm)$/i.test(url))throw new UploadError('invalid_media_url',400);
+ if(typeof url!=='string')throw new UploadError('invalid_media_url',400);
+ // Channel-archived objects live under an identity-derived prefix instead of a UUID.
+ if(/^\/api\/media\/uploads\/wx\/[0-9a-f]{16}\/\d{1,30}-[0-4](?:-thumb)?\.(jpg|png|gif|webp|mp4|webm)$/.test(url))return url.slice('/api/media/'.length);
+ if(!/^\/api\/media\/uploads\/[0-9a-f-]+(?:-thumb)?\.(jpg|png|gif|webp|mp4|webm)$/i.test(url))throw new UploadError('invalid_media_url',400);
  const key=url.slice('/api/media/'.length),id=key.slice(8).split('.')[0].replace(/-thumb$/,'');
  if(!uploadIdPattern.test(id))throw new UploadError('invalid_media_key',400);
  return key;

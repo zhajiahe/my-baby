@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs';
 import {repository,type Database,type Statement,type SQLValue} from '../src/lib/d1-repository';
 import {d1Store} from '../src/lib/agent/d1-store';
 import {executeOperation} from '../src/lib/agent/service';
+import {mediaNamespace} from '../shared/agent';
 import {createMediaOnce} from '../src/lib/media-upload';
 function harness(){
  const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('cloudflare/migrations/0001_initial.sql','utf8'));sqlite.exec(readFileSync('cloudflare/migrations/0002_media_upload_receipts.sql','utf8'));
@@ -87,5 +88,31 @@ test('D1 album reads aggregate months, filter by type and never return private U
   // Reads are never receipts and never mutate.
   assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM agent_operations').get()!.n,0);
   assert.equal(await h.repo.mediaItem.count(),5);
+ }finally{h.sqlite.close();}
+});
+
+test('D1 media archive derives the URL, verifies once and replays idempotently',async()=>{
+ const h=await setup();try{
+  const key=`${mediaNamespace('bot','allowed')}123-0.jpg`,thumb=`${mediaNamespace('bot','allowed')}123-1-thumb.jpg`;
+  let verifications=0;const verifyWrite=async()=>{verifications++;};
+  const mediaRequest={...request,operation:'create_media_record',args:{date:'2026-10-11',key,mediaType:'IMAGE',title:'满月'}};
+  const first=await executeOperation(mediaRequest,{store:h.store,grants,writesEnabled:true,verifyWrite});
+  const row=await h.repo.mediaItem.findFirst({where:{babyId:'baby'}});
+  // The URL is derived from the key and never accepted from the caller.
+  assert.equal(row!.url,`/api/media/${key}`);assert.equal(row!.format,'jpg');
+  assert.equal(row!.mediaType,'IMAGE');assert.equal(row!.title,'满月');assert.equal(row!.duration,null);
+  assert.deepEqual(first.data,{id:row!.id,date:'2026-10-11T00:00:00.000Z',mediaType:'IMAGE',format:'jpg'});
+  const replay=await executeOperation(mediaRequest,{store:h.store,grants,writesEnabled:true,verifyWrite});
+  assert.ok(replay.replayed);assert.equal(verifications,1);
+  assert.equal(await h.repo.mediaItem.count(),1);
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM agent_operations').get()!.n,1);
+  // A video with a stored poster keeps both derived references.
+  const videoKey=`${mediaNamespace('bot','allowed')}123-1.mp4`;
+  await executeOperation({...request,operation:'create_media_record',operationKey:'op_1',
+   args:{date:'2026-10-11',key:videoKey,mediaType:'VIDEO',duration:9.4,thumbnailKey:thumb}},
+   {store:h.store,grants,writesEnabled:true,verifyWrite:async()=>{}});
+  const video=(await h.repo.mediaItem.findMany({where:{babyId:'baby'},orderBy:{date:'desc'}})).find(item=>item.mediaType==='VIDEO');
+  assert.equal(video!.url,`/api/media/${videoKey}`);assert.equal(video!.thumbnailUrl,`/api/media/${thumb}`);
+  assert.equal(video!.duration,9);
  }finally{h.sqlite.close();}
 });

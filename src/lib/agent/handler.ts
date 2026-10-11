@@ -1,8 +1,8 @@
 import { equalSecret, limitedJson } from '../auth'
 import { ContractError } from '../../../shared/agent'
-import { executeOperation, type AgentStore } from './service'
+import { executeOperation, type AgentStore, type WriteVerifier } from './service'
 
-export function agentHandler(options: { store: AgentStore; token?: string; grants?: string; writesEnabled: boolean }) {
+export function agentHandler(options: { store: AgentStore; token?: string; grants?: string; writesEnabled: boolean; verifyWrite?: WriteVerifier }) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'private, no-store' }
     const reply = (data: unknown, status: number) => Response.json(data, { status, headers })

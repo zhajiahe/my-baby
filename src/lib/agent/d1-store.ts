@@ -1,5 +1,5 @@
 import type { AgentStore, Receipt, ReceiptKey, AgentResult } from './service';
-import { repository, newRow, insert, type Database } from '../d1-repository';
+import { repository, newRow, insert, type Database, type Row } from '../d1-repository';
 const condition='source=? AND botId=? AND messageId=? AND operationKey=?';
 const values=(key:ReceiptKey)=>[key.source,key.botId,key.messageId,key.operationKey];
 export function d1Store(db:Database):AgentStore {
@@ -37,11 +37,24 @@ export function d1Store(db:Database):AgentStore {
   transaction:async()=>{throw new Error('d1_interactive_transactions_unsupported');},
   isUniqueConflict:()=>false,
   async atomicWrite(request,babyId,key,payloadHash,baby) {
-   const a=request.args, table=request.operation==='create_growth_record'?'growth_records':'milestones';
-   const row=newRow(table,{babyId,date:new Date(`${a.date}T00:00:00.000Z`),
+   const a=request.args;
+   const table=request.operation==='create_growth_record'?'growth_records'
+    :request.operation==='create_media_record'?'media_items':'milestones';
+   let row:Row;
+   if(table==='media_items'){
+    // The URL is derived here, never accepted from the caller. Object existence,
+    // size, MIME and container signature are verified by the pre-commit hook.
+    const objectKey=String(a.key), format=objectKey.slice(objectKey.lastIndexOf('.')+1);
+    row=newRow('media_items',{babyId,date:new Date(`${a.date}T00:00:00.000Z`),title:a.title??'',
+     description:a.description,url:`/api/media/${objectKey}`,mediaType:a.mediaType,format,
+     thumbnailUrl:a.thumbnailKey?`/api/media/${a.thumbnailKey}`:null,duration:a.duration});
+   } else {
+    row=newRow(table,{babyId,date:new Date(`${a.date}T00:00:00.000Z`),
      ...(table==='growth_records'?{weight:a.weight,height:a.height,headCircumference:a.headCircumference,notes:a.notes}
        :{title:a.title,description:a.description,tags:a.tags??[]})});
-   const fields=table==='growth_records'?['id','date','weight','height','headCircumference']:['id','date','title'];
+   }
+   const fields=table==='growth_records'?['id','date','weight','height','headCircumference']
+    :table==='media_items'?['id','date','mediaType','format']:['id','date','title'];
    const result:AgentResult={operation:request.operation,baby,data:Object.fromEntries(fields.map(k=>[k,row[k]]))};
    const receipt={payloadHash,result};
    try {

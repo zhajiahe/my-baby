@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ContractError, validateRequest, resolveGrant } from '../shared/agent'
+import { ContractError, validateRequest, resolveGrant, mediaNamespace, isModelOperation, MODEL_OPERATIONS } from '../shared/agent'
 import { agentHandler } from '../src/lib/agent/handler'
 import { executeOperation, type AgentResult, type AgentStore, type Receipt, type ReceiptKey } from '../src/lib/agent/service'
 
@@ -76,6 +76,64 @@ test('album arguments reject unbounded, mistyped, reversed-range and unknown fie
     { limit: 5, mediaType: 'VIDEO' })
   assert.deepEqual(validateRequest({ ...request, operation: 'list_media_items', args: {} }).args, { limit: 10 })
 })
+
+test('media archive keys are bound to the authenticated identity namespace', () => {
+  const namespace = mediaNamespace('bot', 'allowed');
+  const key = `${namespace}123-0.jpg`, thumb = `${namespace}123-0-thumb.jpg`, video = `${namespace}123-1.mp4`;
+  const call = (args: unknown, identity: { botId: string; userId: string } = { botId: 'bot', userId: 'allowed' }) =>
+    validateRequest({ source: 'weixin', ...identity, messageId: '123', operation: 'create_media_record', operationKey: 'op_0', args });
+  assert.equal(call({ date: '2026-10-11', key, mediaType: 'IMAGE', title: '满月' }).args.key, key);
+  // A well-formed key from someone else's namespace is refused outright.
+  for (const args of [
+    { date: '2026-10-11', key: `${mediaNamespace('bot', 'stranger')}123-0.jpg`, mediaType: 'IMAGE' },
+    { date: '2026-10-11', key: video, mediaType: 'VIDEO', thumbnailKey: `${mediaNamespace('bot', 'stranger')}123-0-thumb.jpg` },
+  ]) assert.throws(() => call(args), (error: unknown) => error instanceof ContractError && error.status === 403);
+  // Shape violations: prefix, extension, index bound, URL form and query tricks.
+  for (const invalid of ['uploads/wx/zzz/123-0.jpg', `${namespace}123-0.exe`, `uploads/wx/${'a'.repeat(16)}/123-9.jpg`,
+    `/api/media/${key}`, `${key}?x=1`, `${namespace}../../etc/passwd.jpg`, `${namespace}123-0.JPG`.replace('.JPG', '.jpg/../x.jpg')]) {
+    assert.throws(() => call({ date: '2026-10-11', key: invalid, mediaType: 'IMAGE' }));
+  }
+  assert.throws(() => call({ date: '2026-10-11', key, mediaType: 'VIDEO' }), /media_type_mismatch/);
+  assert.throws(() => call({ date: '2026-10-11', key: video, mediaType: 'IMAGE' }), /media_type_mismatch/);
+  const video_ = call({ date: '2026-10-11', key: video, mediaType: 'VIDEO', duration: 12.6, thumbnailKey: thumb });
+  assert.equal(video_.args.duration, 13);
+  assert.throws(() => call({ date: '2026-10-11', key: video, mediaType: 'VIDEO', thumbnailKey: `${namespace}123-1.jpg` }), /invalid_thumbnail_key/);
+  assert.throws(() => call({ date: '2026-10-11', key, mediaType: 'IMAGE', thumbnailKey: thumb }), /invalid_thumbnail_key/);
+  assert.throws(() => call({ date: '2026-10-11', key: video, mediaType: 'VIDEO', duration: 4000 }), /invalid_duration/);
+  assert.throws(() => call({ date: '2026-02-30', key, mediaType: 'IMAGE' }));
+  assert.throws(() => call({ date: '2026-10-11', key, mediaType: 'IMAGE', url: '/api/media/evil.jpg' }));
+  assert.throws(() => call({ date: '2026-10-11', key, mediaType: 'AUDIO' }));
+  // Media archiving is channel-driven, never model-driven.
+  assert.ok(!MODEL_OPERATIONS.includes('create_media_record'));
+  assert.equal(isModelOperation('create_media_record'), false);
+  assert.equal(isModelOperation('delete_baby'), false);
+  assert.equal(isModelOperation('create_milestone'), true);
+});
+
+test('object verification runs once before commit and never on replay', async () => {
+  const { store, records } = memoryStore();
+  let verifications = 0;
+  const verifyWrite = async () => { verifications++; };
+  const mediaRequest = { ...request, operation: 'create_media_record', operationKey: 'op_0',
+    args: { date: '2026-10-11', key: `${mediaNamespace('bot', 'allowed')}123-0.jpg`, mediaType: 'IMAGE' } };
+  await executeOperation(mediaRequest, { store, grants, writesEnabled: true, verifyWrite });
+  assert.equal(verifications, 1);
+  const replay = await executeOperation(mediaRequest, { store, grants, writesEnabled: true, verifyWrite });
+  assert.ok(replay.replayed); assert.equal(verifications, 1, 'a replay must not re-verify a stored object');
+  assert.equal(records.length, 1);
+});
+
+test('missing stored objects block the commit, leave no receipt and stay retryable', async () => {
+  const { store, records } = memoryStore();
+  const mediaRequest = { ...request, operation: 'create_media_record', operationKey: 'op_0',
+    args: { date: '2026-10-11', key: `${mediaNamespace('bot', 'allowed')}123-0.jpg`, mediaType: 'IMAGE' } };
+  await assert.rejects(executeOperation(mediaRequest, { store, grants, writesEnabled: true,
+    verifyWrite: async () => { throw new ContractError('upload_not_complete', 409); } }), /upload_not_complete/);
+  assert.equal(records.length, 0);
+  await assert.rejects(executeOperation(mediaRequest, { store, grants, writesEnabled: false, verifyWrite: async () => {} }), /writes_disabled/);
+  const accepted = await executeOperation(mediaRequest, { store, grants, writesEnabled: true, verifyWrite: async () => {} });
+  assert.equal(records.length, 1); assert.equal(accepted.replayed, undefined);
+});
 
 test('grants are mandatory, unambiguous and identity-specific; model cannot pass babyId', () => {
   assert.throws(() => resolveGrant(request as never, undefined), (e: unknown) => e instanceof ContractError && e.status === 503)

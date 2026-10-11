@@ -1,4 +1,4 @@
-import { calendarDate, validateOperation, type AgentPlan, type BabySummary } from '../../shared/agent.js';
+import { calendarDate, isModelOperation, validateOperation, type AgentPlan, type BabySummary } from '../../shared/agent.js';
 import { DEFAULT_MODEL } from './types.js';
 
 export const TOOLS = [
@@ -86,6 +86,9 @@ ${input.writesEnabled ? '可规划明确要求的新增记录。' : '当前仅�
   const operations = calls.map(call => {
     try {
       if (call?.type !== 'function' || typeof call.function?.arguments !== 'string') throw new Error();
+      // The planner may only propose model-facing operations. Channel-driven
+      // operations (media archive) are rejected even if a model emits their name.
+      if (!isModelOperation(call.function.name)) throw new Error();
       return validateOperation(call.function.name, JSON.parse(call.function.arguments));
     } catch { throw new AgentError('invalid_tool_arguments'); }
   });

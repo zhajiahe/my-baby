@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calendarDate } from '../../shared/agent.js';
+import { calendarDate, isModelOperation } from '../../shared/agent.js';
 import { planMessage, AgentError } from '../src/agent.js';
 import { prepareAgentReply, type AgentCheckpoint } from '../src/agent-run.js';
 import { callTool, executePlan, formatResults } from '../src/tools.js';
@@ -100,6 +100,20 @@ test('resume partial success executes only remaining stable operation', async t 
   });
   const results = await executePlan(input.identity, plan, config, previous, async () => {});
   assert.equal(results.length, 2); assert.ok(formatResults(plan, results).includes('第一次走路'));
+});
+
+test('the planner cannot propose channel-driven media archiving', async t => {
+  assert.equal(isModelOperation('create_media_record'), false);
+  assert.equal(isModelOperation('create_growth_record'), true);
+  assert.equal(isModelOperation('delete_baby'), false);
+  // Even if a model emits the tool name, planning must refuse it: the channel, not
+  // the model, decides when a photo is archived.
+  t.mock.method(globalThis, 'fetch', async () => Response.json(modelResponse('create_media_record',
+    { date: '2026-10-11', key: `uploads/wx/${'a'.repeat(16)}/1-0.jpg`, mediaType: 'IMAGE' })));
+  await assert.rejects(planMessage({ ...input, baby, writesEnabled: true }, config),
+    (e: unknown) => e instanceof AgentError && e.code === 'invalid_tool_arguments');
+  assert.ok(!JSON.stringify(await import('../src/agent.js').then(m => m.TOOLS)).includes('create_media_record'),
+    'media archiving must not be offered to the model');
 });
 
 test('album replies summarise server-side and never leak private media links', () => {

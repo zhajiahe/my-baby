@@ -193,8 +193,19 @@ Agent 从“成长记录”扩展到“相册 + 语音”的实现状态。**已
 
 这让 `AGENT_MEDIA_VOICE_PLAN.md` 一直等待的 spike 变成零风险操作：发一条语音后看 `reception.rejected` 是否出现 `voice_message`，即可确认语音是否真的到达 Bot。
 
-### 8.4 本轮测试统计（历史数字不回改）
+### 8.4 图片归档写入侧契约（`create_media_record`）
 
-- 根项目 `npm run test:unit`：**27/27**；`npm run typecheck` 通过；`npm run lint` **0 errors**。
-- `weixin`：`npm test` **56/56**；`npm run typecheck` 通过。
+服务端契约与校验已实现（有测试），**但桥接侧的下载/上传/调用尚未实现**（依赖 `AGENT_MEDIA_VOICE_PLAN.md` §2.2 的真实 payload 结构）。
+
+- **不是模型可见的工具**：模型无法上传文件，也不应该有权触发归档。`MODEL_OPERATIONS` 显式排除它；即使模型编造出 `create_media_record`，规划阶段也会拒绝（`invalid_tool_arguments`，有测试）。归档只由通道在收到图片时触发。
+- **URL 由服务端派生**，从不接受调用方传入的 URL（传入 `url` 字段会被拒）。调用方只给 object key，服务端拼出 `/api/media/<key>`。
+- **key 绑定到已认证身份的命名空间**：`uploads/wx/<16位哈希>/<messageId>-<0..4>.<ext>`。前缀由服务端从**请求信封里已认证的 botId/userId** 派生并比对，所以形状合法但属于其它身份的 key 返回 **403**。哈希只是不把身份写进对象 key，安全性来自服务端比对。
+- **对象校验只做一次**：提交前用现有 `validateObject`（与浏览器直传路径同一套逻辑）核对对象存在、实际大小、MIME 与容器签名；**回放不重新校验**——否则之后删了对象会把一次成功写入变成永久失败，破坏幂等。测试专门断言“回放不重复校验”，以及“校验失败不留回执、仍可重试”。
+- **扩展名与 `mediaType` 必须一致**：扩展名决定 MIME，冲突直接拒绝，不做调和。缩略图只允许视频且必须为 `<key>-thumb.jpg`；`duration` 限 0–3600 秒并取整。
+- 测试覆盖：契约越权与形状（目录穿越、URL 形式、query 后缀）、一次性校验、回放不校验、写入开关，以及真实 SQLite 上的派生 URL / 回执幂等 / 视频缩略图。
+
+### 8.5 本轮测试统计（历史数字不回改）
+
+- 根项目 `npm run test:unit`：**31/31**；`npm run typecheck` 通过；`npm run lint` **0 errors**；`npm run build` 通过。
+- `weixin`：`npm test` **57/57**；`npm run typecheck` 通过。
 - 前文各节的用例数（9、10、30、47 等）是当时的历史快照。

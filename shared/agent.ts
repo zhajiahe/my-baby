@@ -1,6 +1,14 @@
 // Channel-independent contract. Never allow the model to choose authentication,
 // babyId, message identity or an idempotency key.
-export type OperationName = 'get_baby_summary' | 'list_growth_records' | 'list_media_items' | 'get_album_summary' | 'create_growth_record' | 'create_milestone';
+export type OperationName = 'get_baby_summary' | 'list_growth_records' | 'list_media_items' | 'get_album_summary' | 'create_growth_record' | 'create_milestone' | 'create_media_record';
+// Operations the planner may propose. Channel-driven operations are deliberately
+// excluded: the model cannot upload a file and must never be able to trigger
+// media archiving, even by emitting a tool name it was not offered.
+export const MODEL_OPERATIONS: readonly OperationName[] = ['get_baby_summary', 'list_growth_records',
+  'list_media_items', 'get_album_summary', 'create_growth_record', 'create_milestone'];
+export function isModelOperation(name: unknown): name is OperationName {
+  return typeof name === 'string' && (MODEL_OPERATIONS as readonly string[]).includes(name);
+}
 export type ToolArgs = Record<string, string | number | string[]>;
 export interface PlannedOperation { name: OperationName; args: ToolArgs }
 export interface AgentPlan { version: 1; operations: PlannedOperation[]; clarification?: string }
@@ -31,6 +39,26 @@ function exact(args: Record<string, unknown>, keys: string[]) {
   if (Object.keys(args).some(k => !keys.includes(k))) throw new ContractError('unexpected_argument');
 }
 
+// Media archive keys are minted by the channel under an identity-derived prefix.
+// The pattern is shape-only; validateRequest additionally binds the prefix to the
+// authenticated identity so a caller-chosen key cannot reach another namespace.
+const AGENT_OBJECT_KEY = /^uploads\/wx\/[0-9a-f]{16}\/\d{1,30}-[0-4](?:-thumb)?\.(jpg|png|gif|webp|mp4|webm)$/;
+export function mediaObjectKey(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 200 || !AGENT_OBJECT_KEY.test(value)) throw new ContractError('invalid_media_key');
+  return value;
+}
+export function mediaKeyFormat(key: string): string { return key.slice(key.lastIndexOf('.') + 1); }
+function mediaKeyIsVideo(key: string): boolean { return ['mp4', 'webm'].includes(mediaKeyFormat(key)); }
+export function mediaNamespace(botId: string, userId: string): string {
+  // Deterministic namespace label, not a secret. Security comes from the server
+  // comparing it against the authenticated identity; hashing only keeps channel
+  // identities out of object keys.
+  const round = (seed: number) => { let h = seed;
+    for (const ch of `${botId}\u0000${userId}`) { h ^= ch.codePointAt(0)!; h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(16).padStart(8, '0'); };
+  return `uploads/wx/${round(0x811c9dc5)}${round(0x9e3779b9)}/`;
+}
+
 export function validateOperation(name: unknown, input: unknown): PlannedOperation {
   const args = object(input);
   const result: ToolArgs = {};
@@ -58,6 +86,28 @@ export function validateOperation(name: unknown, input: unknown): PlannedOperati
   } else if (name === 'get_album_summary') {
     // No arguments: the rollup is computed server-side so the model never does arithmetic.
     exact(args, []);
+  } else if (name === 'create_media_record') {
+    exact(args, ['date', 'key', 'mediaType', 'title', 'description', 'duration', 'thumbnailKey']);
+    result.date = date(args.date);
+    result.key = mediaObjectKey(args.key);
+    if (args.mediaType !== 'IMAGE' && args.mediaType !== 'VIDEO') throw new ContractError('invalid_media_type');
+    // The extension is authoritative: it decides MIME, so a declared type that
+    // disagrees with it is rejected rather than reconciled.
+    if (mediaKeyIsVideo(result.key as string) !== (args.mediaType === 'VIDEO')) throw new ContractError('media_type_mismatch');
+    result.mediaType = args.mediaType;
+    const mediaTitle = string(args.title, 120, false); if (mediaTitle) result.title = mediaTitle;
+    const mediaDescription = string(args.description, 2000, false); if (mediaDescription) result.description = mediaDescription;
+    if (args.duration !== undefined) {
+      if (typeof args.duration !== 'number' || !Number.isFinite(args.duration) || args.duration < 0 || args.duration > 3600) {
+        throw new ContractError('invalid_duration');
+      }
+      result.duration = Math.round(args.duration);
+    }
+    if (args.thumbnailKey !== undefined) {
+      const thumbnail = mediaObjectKey(args.thumbnailKey);
+      if (args.mediaType !== 'VIDEO' || !thumbnail.endsWith('-thumb.jpg')) throw new ContractError('invalid_thumbnail_key');
+      result.thumbnailKey = thumbnail;
+    }
   } else if (name === 'create_growth_record') {
     exact(args, ['date', 'weight', 'height', 'headCircumference', 'notes']);
     result.date = date(args.date);
@@ -88,8 +138,16 @@ export function validateRequest(value: unknown): AgentRequest {
   const op = validateOperation(data.operation, data.args);
   const operationKey = string(data.operationKey, 80)!;
   if (!/^[a-zA-Z0-9_-]+$/.test(operationKey)) throw new ContractError('invalid_operation_key');
-  return { source: 'weixin', botId: string(data.botId, 256)!, userId: string(data.userId, 256)!,
+  const request: AgentRequest = { source: 'weixin', botId: string(data.botId, 256)!, userId: string(data.userId, 256)!,
     messageId: string(data.messageId, 80)!, operationKey, operation: op.name, args: op.args };
+  if (op.name === 'create_media_record') {
+    const prefix = mediaNamespace(request.botId, request.userId);
+    for (const field of ['key', 'thumbnailKey'] as const) {
+      const value = op.args[field];
+      if (value !== undefined && !String(value).startsWith(prefix)) throw new ContractError('media_key_outside_identity', 403);
+    }
+  }
+  return request;
 }
 
 export function resolveGrant(identity: AgentIdentity, config: string | undefined): AgentGrant {

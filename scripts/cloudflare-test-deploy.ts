@@ -13,8 +13,14 @@ if(database.name!=='mybaby-cloudflare-migration-test')throw new Error('unexpecte
 const secrets=JSON.parse(readFileSync(`${dir}/secrets.json`,'utf8'));
 if(!secrets.MYBABY_OPERATIONS_TOKEN){secrets.MYBABY_OPERATIONS_TOKEN=randomBytes(32).toString('hex');writeFileSync(`${dir}/secrets.json`,JSON.stringify(secrets),{mode:0o600});}
 const version=codeVersion();writeFileSync(`${dir}/code-version.json`,JSON.stringify(version),{mode:0o600});
+// Live-Weixin grants are read from a private 0600 file and must be explicitly requested.
+const grantFile=`${dir}/live-weixin-grant.json`;
+const liveGrant=(()=>{if(!process.argv.includes('--live-weixin-grant'))return null;
+ const parsed=JSON.parse(readFileSync(grantFile,'utf8'));
+ if(!Array.isArray(parsed)||!parsed.length||parsed.some((g:Record<string,unknown>)=>g.source!=='weixin'||typeof g.botId!=='string'||!g.botId||typeof g.userId!=='string'||!g.userId||typeof g.babyId!=='string'||!g.babyId))throw new Error('invalid_live_weixin_grant_file');
+ return parsed;})();
 const env={...process.env,MYBABY_CODE_VERSION:version.version,MYBABY_TEST_WRITES_FROZEN:process.argv.includes('--freeze-writes')?'true':'false',MYBABY_SOURCE_BUCKET:process.argv.includes('--without-source-media')?'':target.sourceBucket,MYBABY_R2_ACCOUNT_ID:target.accountId,MYBABY_D1_TEST_ID:target.databaseId,
- MYBABY_TEST_AGENT_GRANTS:(process.argv.includes('--agent-test')||process.argv.includes('--synthetic-agent'))?JSON.stringify([{source:'weixin',botId:'cloud-migration-test-bot',
+ MYBABY_TEST_AGENT_GRANTS:liveGrant?JSON.stringify(liveGrant):(process.argv.includes('--agent-test')||process.argv.includes('--synthetic-agent'))?JSON.stringify([{source:'weixin',botId:'cloud-migration-test-bot',
  userId:'cloud-migration-test-user',babyId:process.argv.includes('--synthetic-agent')?'e2e-baby':JSON.parse(readFileSync(`${dir}/source.json`,'utf8')).rows.babies[0].id}]):''};
 let log=run('npx',['vinext','build'],env);
 log+=run('cf',['deploy','--prebuilt','--provision=false','--secrets-file',`${dir}/secrets.json`],env);

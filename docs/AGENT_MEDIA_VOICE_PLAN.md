@@ -61,6 +61,49 @@
 
 拿到结构后，剩下的是：把 `VoiceSource` 换成真实下载 + AES 解密（照官方客户端的 AES-128 实现，不自己造），并把媒体事件接入 DO 事件流。
 
+### 2.2c 实测到的真实结构（2026-10-11，`adapterVersion 0.1.5` 探针）
+
+真实微信发送 1 条语音 + 1 张照片，探针只记字段路径与类型。**下列内容不含任何值。**
+
+每条 `item_list` 条目自带的字段：`type` · `msg_id:string` · `create_time_ms:number` · `update_time_ms:number` · `is_completed:boolean` · `button_item_list:array` · `at_bot_username_list:array`。
+
+**语音 `voice_item`：**
+
+```text
+voice_item.media.full_url:string
+voice_item.media.encrypt_query_param:string
+voice_item.media.aes_key:string
+voice_item.encode_type:number      # 推测为编码类型（需实测确认取值含义）
+voice_item.bits_per_sample:number
+voice_item.sample_rate:number
+voice_item.playtime:number         # 时长，单位未确认（推测 ms）
+voice_item.text:string             # 非空！
+```
+
+**图片 `image_item`：**
+
+```text
+image_item.aeskey:string
+image_item.media.full_url:string
+image_item.media.encrypt_query_param:string
+image_item.media.aes_key:string
+image_item.hd_size / mid_size / thumb_size / thumb_height / thumb_width :number
+```
+
+#### 结构带来的两个修正
+
+1. **`voice_item.text` 非空，很可能是微信自带的语音转文字。** 如果是，则“下载 → AES 解密 → ASR”整条方案可以不要：无需处理 AMR/Silk、无需音频出境、无额外费用。`asr.ts`/`media.ts` 仍作为 `text` 为空时的兜底保留。
+   **未验证**：`text` 的内容确实不能通过探针验证（那正是探针不记值的原因）。唯一正确的验证是让桥接直接用它回复，由用户在微信里判断是否为自己的原话。
+2. **字段名与之前的推测不同**：不是 `media{aeskey}` 单一形式，而是 `media.full_url` + `media.encrypt_query_param` + `media.aes_key`；图片另外多一个顶层 `aeskey`。`duration` 实际叫 `playtime`。所以之前任何“照猜写”的下载实现都会错。
+
+#### 仍然未知
+
+- AES 解密的确切算法/模式（需照官方客户端的 AES-128 实现，不得自造）。
+- `encrypt_query_param` vs `aes_key` 在请求时各自如何用。
+- `encode_type` 的取值含义（直接影响格式白名单）。
+- `text` 为空时是否存在，以及空时如何退。
+- 图片/语音的大小上限与是否需要缩略图单独下载。
+
 ### 2.2b 原步骤（保留供参考）
 
 临时加一行脱敏日志（只打 `type` 和字段名，不打正文/key），拿到真实结构：

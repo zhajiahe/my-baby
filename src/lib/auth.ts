@@ -4,7 +4,10 @@ export const SESSION_COOKIE = 'mybaby_session'
 export const SESSION_TTL = 7 * 24 * 60 * 60
 export interface AuthConfig { password?: string; secret?: string }
 export function authConfig(): AuthConfig { return { password: process.env.MYBABY_APP_PASSWORD, secret: process.env.MYBABY_SESSION_SECRET } }
-export function authConfigured(config: AuthConfig): boolean { return (config.password?.length ?? 0) >= 12 && (config.secret?.length ?? 0) >= 32 }
+// Family password minimum is deliberately 6 (owner decision, 2026-10-11). The session
+// signing secret keeps its >=32 requirement; a 6-digit password relies on the login
+// rate limit, which is still best-effort per instance and needs a distributed WAF limit.
+export function authConfigured(config: AuthConfig): boolean { return (config.password?.length ?? 0) >= 6 && (config.secret?.length ?? 0) >= 32 }
 export function equalSecret(a: string, b: string): boolean {
   return timingSafeEqual(createHash('sha256').update(a).digest(), createHash('sha256').update(b).digest())
 }

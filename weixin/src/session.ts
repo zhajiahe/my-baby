@@ -3,7 +3,7 @@ import { getUpdates, sendText, incomingText, incomingTextRejection, eventId, tru
 import { isInboxEvent, type Env, type SessionConfig, type StoredEvent } from './types.js';
 import { prepareAgentReply, type AgentCheckpoint } from './agent-run.js';
 import { AgentError } from './agent.js';
-import { formatResults } from './tools.js';
+import { failureReply, formatResults } from './tools.js';
 
 const RETENTION_MS = 30 * 86_400_000;
 const LEASE_MS = 60_000;
@@ -279,7 +279,7 @@ export class WeixinSession {
           const forbidden = ['business_http_401','business_http_403'].includes(error.code);
           const completed = !forbidden && checkpoint.results.length && checkpoint.plan
             ? formatResults({ version: 1, operations: checkpoint.plan.operations.slice(0, checkpoint.results.length) }, checkpoint.results) : '';
-          reply = `${completed ? completed + '\n' : ''}本次处理未全部完成，请检查权限、配置或重新说明需求。`;
+          reply = `${completed ? completed + '\n' : ''}${failureReply(error.code)}`;
           checkpoint.reply = reply; await persist(checkpoint);
         }
         guard();

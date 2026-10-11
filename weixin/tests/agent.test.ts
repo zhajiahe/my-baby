@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { calendarDate, isModelOperation } from '../../shared/agent.js';
 import { planMessage, AgentError } from '../src/agent.js';
 import { prepareAgentReply, type AgentCheckpoint } from '../src/agent-run.js';
-import { callTool, executePlan, formatResults } from '../src/tools.js';
+import { callTool, executePlan, failureReply, formatResults } from '../src/tools.js';
 
 const config = { apiKey: 'synthetic-key', model: 'meta/muse-spark-1.3-contributor', origin: 'https://mybaby.example',
   token: 't'.repeat(64), writesEnabled: true, timeZone: 'Asia/Shanghai' };
@@ -100,6 +100,43 @@ test('resume partial success executes only remaining stable operation', async t 
   });
   const results = await executePlan(input.identity, plan, config, previous, async () => {});
   assert.equal(results.length, 2); assert.ok(formatResults(plan, results).includes('第一次走路'));
+});
+
+test('growth replies never drop a stored measurement and failures stay family-readable', () => {
+  // Regression: head circumference was written but omitted from query replies, so
+  // the family believed it had not been saved.
+  const plan = { version: 1 as const, operations: [{ name: 'list_growth_records' as const, args: { limit: 5 } }] };
+  const record = { date: '2026-10-11T00:00:00.000Z', weight: 9.5, height: 72, headCircumference: 45 };
+  const listed = formatResults(plan, [{ operation: 'list_growth_records', baby, data: { records: [record] } }]);
+  for (const expected of ['9.5 kg', '72 cm', '45 cm']) assert.ok(listed.includes(expected), `list reply lost ${expected}`);
+  // Create and list replies are generated from one field table, so they agree.
+  const created = formatResults({ version: 1 as const, operations: [{ name: 'create_growth_record' as const, args: {} }] },
+    [{ operation: 'create_growth_record', baby, data: { ...record, id: 'record-1' } }]);
+  for (const value of ['9.5', '72', '45']) assert.ok(created.includes(value));
+  assert.ok(listed.includes('45 cm') && created.includes('头围 45 cm'), 'labelled and unlabelled replies must both carry head circumference');
+  const partial = formatResults(plan, [{ operation: 'list_growth_records', baby, data: { records: [{ date: record.date, weight: 9.5 }] } }]);
+  assert.ok(partial.includes('9.5 kg') && !partial.includes('undefined'));
+
+  assert.ok(failureReply('forbidden').includes('权限'));
+  assert.ok(failureReply('business_http_403').includes('权限'));
+  assert.ok(failureReply('writes_disabled').includes('没有保存'));
+  assert.ok(failureReply('anything_unknown').includes('重发'));
+  for (const code of ['forbidden', 'writes_disabled', 'session_rebound', 'internal_or_queue', 'unknown']) {
+    const text = failureReply(code);
+    assert.ok(text.length > 0 && !/http_|Error|_|writes_enabled|token/i.test(text), `internal detail leaked for ${code}`);
+  }
+});
+
+test('planner prompt pins unit conversion and confirmation rules', async t => {
+  t.mock.method(globalThis, 'fetch', async (_url: string, options: RequestInit) => {
+    const system = JSON.parse(options.body as string).messages[0].content as string;
+    assert.ok(system.includes('1 斤 = 0.5 kg'), 'jin to kg conversion must be stated explicitly');
+    assert.ok(system.includes('不要猜'), 'missing units must be clarified, never guessed');
+    assert.ok(system.includes('20kg'), 'implausible measurements must be confirmed first');
+    assert.ok(system.includes('list_growth_records'), 'same-day duplicates must be checked before writing');
+    return Response.json(modelResponse());
+  });
+  await planMessage({ ...input, baby, writesEnabled: true }, config);
 });
 
 test('the planner cannot propose channel-driven media archiving', async t => {

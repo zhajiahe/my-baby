@@ -60,6 +60,24 @@ export async function executePlan(identity: AgentIdentity, plan: AgentPlan, conf
   return results;
 }
 
+// One field table feeds both the create and list replies so a newly added
+// measurement cannot be written but silently omitted from query results, which
+// is exactly how head circumference was lost before.
+const MEASUREMENTS = [['weight', '体重', 'kg'], ['height', '身高', 'cm'], ['headCircumference', '头围', 'cm']] as const;
+function measurements(data: Record<string, unknown>, labelled: boolean): string {
+  return MEASUREMENTS.flatMap(([field, label, unit]) => data[field] === null || data[field] === undefined
+    ? [] : [`${labelled ? `${label} ` : ''}${data[field]} ${unit}`]).join('，');
+}
+
+// Fixed, family-readable failure sentences. Never a raw error code, never a stack
+// trace, and never a silent drop.
+export function failureReply(code: string): string {
+  if (['forbidden', 'business_http_401', 'business_http_403'].includes(code)) return '这个微信号还没有操作权限，请先让管理员授权。';
+  if (code === 'writes_disabled') return '当前还没开启写入，这条没有保存。';
+  if (code === 'session_rebound' || code === 'session_not_running') return '刚才会话状态变了，请重发一次。';
+  return '没处理成功，请把内容重发一句，比如：今天 体重6.5kg 身高70cm';
+}
+
 export function formatResults(plan: AgentPlan, results: ToolResult[]): string {
   if (plan.operations.length === 0) return `尚未执行查询或写入。\n${plan.clarification ?? '请说明要查询或记录的内容。'}`;
   if (results.length !== plan.operations.length) throw new AgentError('incomplete_results');
@@ -67,9 +85,7 @@ export function formatResults(plan: AgentPlan, results: ToolResult[]): string {
     const d = r.data;
     if (r.operation === 'get_baby_summary') return `${r.baby.name}的出生日期：${r.baby.birthDate.slice(0, 10)}。`;
     if (r.operation === 'create_growth_record') {
-      const values = [d.weight != null ? `体重 ${d.weight} kg` : '', d.height != null ? `身高 ${d.height} cm` : '',
-        d.headCircumference != null ? `头围 ${d.headCircumference} cm` : ''].filter(Boolean).join('，');
-      return `已记录${r.baby.name} ${String(d.date).slice(0, 10)}：${values}。记录 ID：${d.id}`;
+      return `已记录${r.baby.name} ${String(d.date).slice(0, 10)}：${measurements(d, true)}。记录 ID：${d.id}`;
     }
     if (r.operation === 'create_milestone') return `已记录${r.baby.name} ${String(d.date).slice(0, 10)}的里程碑：${d.title}。记录 ID：${d.id}`;
     if (r.operation === 'list_media_items') {
@@ -86,7 +102,7 @@ export function formatResults(plan: AgentPlan, results: ToolResult[]): string {
     }
     const records = Array.isArray(d.records) ? d.records : [];
     if (!records.length) return `${r.baby.name}在这个时间范围暂无成长记录。`;
-    return `${r.baby.name}的成长记录：\n` + records.map(record => [String(record.date).slice(0, 10),
-      record.weight != null ? `${record.weight} kg` : '', record.height != null ? `${record.height} cm` : ''].filter(Boolean).join('，')).join('\n');
+    return `${r.baby.name}的成长记录：\n` + records.map(record =>
+      [String(record.date).slice(0, 10), measurements(record, false)].filter(Boolean).join('，')).join('\n');
   }).join('\n');
 }

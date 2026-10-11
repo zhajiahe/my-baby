@@ -105,6 +105,24 @@ image_item.hd_size / mid_size / thumb_size / thumb_height / thumb_width :number
 - `text` 为空时是否存在，以及空时如何退（现已有“没有可用文字”固定回复，未实测触发）。
 - 图片/语音的大小上限与是否需要缩略图单独下载。
 
+#### 图片解密探测结果（2026-10-11，`adapterVersion 0.1.7`）
+
+用户发 1 张照片，探针只记摘要：
+
+```text
+status: 200          # URL 可直接取得，不需额外签名头
+contentType: ""      # 未提供 content-type
+bytes: 187984        # ~184KB，与真实照片大小相符
+signature: unknown   # 前几字节不匹配 JPEG/PNG/GIF/WEBP 任何容器头
+host: qq.com         # weixin.qq.com 域名，已在白名单内
+```
+
+**结论：图片必须做 AES-128 解密，不能直接入库。** 字节数合理但无图像容器头，说明拿到的是密文。
+
+为什么这个探测值得先做：如果照猜实现，会把 ~184KB 密文当作 JPEG 写入 `media_items`，**存得进去、打开是坏图，而且全程不报错**。这是最糟的失败模式，现已被挡住。
+
+**下一步（唯一剩余的未知）**：AES-128 解密实现。必须照官方客户端的实现核对（密钥/IV 派生、分组模式、padding、`aes_key` 先 base64 解码等），**不自造**——猜错同样会得到“能存不能看”的结果。`image_item` 同时存在顶层 `aeskey` 与嵌套 `media.aes_key`，两者用途需从官方实现确认。
+
 ### 2.2b 原步骤（保留供参考）
 
 临时加一行脱敏日志（只打 `type` 和字段名，不打正文/key），拿到真实结构：

@@ -102,11 +102,12 @@ cf deploy --dry-run
 - [x] 人工暂停/等待实例切换/启动后，版本、绑定、游标与完成记录保留，真实收发恢复。
 - [ ] 不停轮询的自动热升级：部署后仍观察到旧 DO 版本，不能宣称已通过。
 - [x] 10 条编号文本完整验收（2026-10-11，见第 10 节）。
+- [x] 真实微信通道 AI 闭环（2026-10-11，隔离后端，见第 11 节）。
 - [ ] 真实凭证轮换/失效重登录。
 - [ ] 至少 24 小时阶段 A 观测；阶段 C 再做 72 小时稳定性测试。
 - [ ] 实际配额与费用监控、DLQ 人工重放、未完成事件的清理策略。
 
-下一步保留当前桥接运行，补齐编号文本与 24 小时观测，核对 Queue/DLQ、费用和告警。阶段 B 的真实 PostgreSQL 事务、业务授权与生产部署仍需单独验收；当前线上只运行独立构建的 A 文字桥接。**基础文字收发已通过，但阶段 A 的完整稳定性验收尚未完成，不据此开启 AI 或业务写入。**
+下一步保留当前桥接运行，补齐 24 小时观测，核对 Queue/DLQ、费用和告警。阶段 B 的生产 PostgreSQL 事务与生产部署仍需单独验收；当前线上只运行独立构建的 A 文字桥接。**真实通道 AI 已在隔离后端验证通过（第 11 节），但线上仍为 stage A、未开启业务写入；阶段 A 的完整稳定性验收尚未完成。**
 
 ## 7. 首次扫码阶段记录（2026-10-11，北京时间，后续结果见第 8 节）
 
@@ -174,3 +175,19 @@ cf deploy --dry-run
 - 判定：**真实通道编号文本 10 条通过**。机器侧只证明服务端受理并回完 10 条不同消息；桥接按 message ID 去重，故该增量同时排除通道重复投递造成的计数膨胀。“收到回复”由用户见证，属人工见证而非机器证据。
 - 证据：`weixin/.local/observation-24-latest.json`（0600，未提交 Git）。
 - **未因此通过**：24h 窗口（起点 `2026-10-11T00:10:38Z`，最早复核 `2026-10-12T00:10:38Z`，即北京 08:10:38）、真实凭证轮换/失效重登录、不停轮询热升级、Queue/DLQ 深度与年龄、实际费用、端到端延迟、外部告警送达、阶段 B 真实通道业务写入。本用例不调用模型、不写宝宝数据；线上仍为 stage A 文字桥接。
+
+## 11. 真实微信通道 AI 闭环（2026-10-11）
+
+隔离验证，不是生产切换。真实微信身份仅临时授权到隔离测试 Worker；测完已撤回并恢复冻结。
+
+- 接线：临时给 `mybaby-weixin` 增加 `MYBABY_AGENT_MODE=agent`、`AGENT_WRITES_ENABLED=true`、`MYBABY_AGENT_ORIGIN=<隔离测试 Worker>`，并新增 `OPENROUTER_API_KEY`、`MYBABY_AGENT_TOKEN` 两个 secret；隔离 Worker 侧为真实微信身份 grants（babyId=`e2e-baby`）+ agent writes 开 + 解冻。
+- 用户真实微信发送：“帮我记录一条成长记录，日期 2026-10-11，体重 9.9 公斤，备注 phase2-real-wechat”。
+- 结果：`growth_records` 新增 `f4ffa20f…`（weight `9.9`、notes `phase2-real-wechat`、date `2026-10-11`）；`agent_operations` 出现 1 条 `create_growth_record`（operationKey `op_0`），dataId 与业务行一致；回执 1 条、业务行 1 条，无重复写入。
+- 桥接状态：`received 15→16`、`accepted 14→15`、`done 14→15`，无 `failed`/`unknown`/`pending`/`stale`，`lastError: null`，`failedCycles: 0`。
+- 人工见证：用户确认微信端收到含记录 ID 的 AI 回答。
+- 判定：**真实通道 AI 闭环通过（隔离后端）**。机器侧证明模型解析→工具调用→原子写入→回执；“收到 AI 回答”由用户见证。
+- Web 侧独立复验（同一真实身份）：只读 200、写入 200、同消息并发同一 id 且 1 次回放、同 key 改 payload 409、未授权身份 403、授权范围读 200；测试写入已清理。
+- **未因此通过**：真实桥接的模型费用计量（`onUsage` 只接在合成验收 Worker）、24h 稳定性、热升级（本轮再次实测：部署后必须 pause/start，DO 才会换代码）、生产库写入、生产部署与切换。
+- 恢复动作（已完成）：桥接回滚到 `f91bd40f`（100%），pause→等待→start；实测绑定列表不再包含 `AGENT_MODE`/`MYBABY_API_ORIGIN`/`OPENROUTER_API_KEY`/`MYBABY_AGENT_TOKEN`；`/health` 回到 `{"ok":true,"stage":"A"}`；游标与 `done: 15` 保留，未重绑、未清 outbox。隔离 Worker grants=`[]`、agent writes=false、写入冻结；真实身份再次调用被拒（503）。
+- 残留：新增的两个 secret 因 Cloudflare 限制（错误 10215：最新版本≠已部署版本时禁止改 secret）在回滚后无法删除，但**未绑定、不生效**；隔离 D1 仍留测试记录 `f4ffa20f…`，将被下次 E2E seed 清除；`weixin/.local/secrets.json` 保留 `OPENROUTER_API_KEY` 与 `MYBABY_AGENT_TOKEN`（0600，未提交）。
+- 相关提交：`c3c520b`（桥接 agent 接线改为环境变量驱动，默认保持 stage A）、`ba009ef`（部署脚本支持显式真实微信身份授权）。

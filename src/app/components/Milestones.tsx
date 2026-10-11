@@ -16,7 +16,7 @@ interface Milestone {
 }
 
 export default function Milestones() {
-  const { baby } = useBaby()
+  const { baby, loading: babyLoading } = useBaby()
   const { milestones, loading, error, createMilestone, updateMilestone, deleteMilestone } = useMilestones(baby?.id)
   const toast = useToastContext()
   
@@ -186,7 +186,7 @@ export default function Milestones() {
     return formData.tags.split(',').map(t => t.trim()).filter(t => t)
   }
 
-  if (loading) {
+  if (loading || babyLoading) {
     return (
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="text-center">

@@ -16,7 +16,7 @@ interface GrowthEntry {
 }
 
 export default function GrowthRecord() {
-  const { baby } = useBaby()
+  const { baby, loading: babyLoading } = useBaby()
   const { records, loading, error, createRecord, updateRecord, deleteRecord } = useGrowthRecords(baby?.id)
   const toast = useToastContext()
   
@@ -252,7 +252,7 @@ export default function GrowthRecord() {
     setCurrentDate(new Date())
   }
 
-  if (loading) {
+  if (loading || babyLoading) {
     return (
       <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
         <div style={{ textAlign: 'center' }}>
@@ -408,6 +408,7 @@ export default function GrowthRecord() {
                 {week.map((dayData, dayIndex) => (
                   <div
                     key={`${weekIndex}-${dayIndex}`}
+                    data-testid={dayData ? `growth-day-${dayData.dateString}` : undefined}
                     style={{
                       minHeight: '120px',
                       borderRight: dayIndex < 6 ? '1px solid #e5e7eb' : 'none',

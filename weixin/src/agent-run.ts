@@ -1,10 +1,10 @@
 import type { AgentIdentity, AgentPlan } from '../../shared/agent.js';
 import { isWrite } from '../../shared/agent.js';
-import { planMessage, AgentError } from './agent.js';
+import { planMessage, AgentError, type ModelUsage } from './agent.js';
 import { babyScope, executePlan, formatResults, type ToolConfig, type ToolResult } from './tools.js';
 
 export interface AgentCheckpoint { plan?: AgentPlan; results: ToolResult[]; reply?: string }
-export interface AgentRunConfig extends ToolConfig { apiKey: string; model: string; timeZone: string }
+export interface AgentRunConfig extends ToolConfig { apiKey: string; model: string; timeZone: string; onUsage?:(usage:ModelUsage)=>Promise<void> }
 
 export async function prepareAgentReply(input: { identity: AgentIdentity; text: string; receivedAt: number },
   config: AgentRunConfig, checkpoint: AgentCheckpoint, save: (state: AgentCheckpoint) => Promise<void>,
@@ -15,7 +15,7 @@ export async function prepareAgentReply(input: { identity: AgentIdentity; text: 
   if (checkpoint.reply) return checkpoint.reply;
   if (!checkpoint.plan) {
     checkpoint.plan = await planMessage({ text: input.text, receivedAt: input.receivedAt, baby,
-      writesEnabled: config.writesEnabled, timeZone: config.timeZone }, { apiKey: config.apiKey, model: config.model });
+      writesEnabled: config.writesEnabled, timeZone: config.timeZone }, { apiKey: config.apiKey, model: config.model,onUsage:config.onUsage });
     guard(); await save(checkpoint); // Commit stable plan before any mutation.
   }
   if (!config.writesEnabled && checkpoint.plan.operations.some(op => isWrite(op.name))) {

@@ -8,8 +8,14 @@ export function proxy(request: NextRequest) {
     response.headers.set('Cross-Origin-Embedder-Policy', 'require-corp')
     return response
   }
-  // Agent and temporary migration routes authenticate independent service tokens.
-  if (path === '/login' || path === '/api/auth/login' || path === '/api/auth/logout' || path === '/api/agent/v1' || path === '/api/migration/copy-media') {
+  // Freeze mutations before independent Agent authorization too. Already-issued
+  // R2 signatures expire separately; wait their TTL and drain uploads at cutover.
+  if(process.env.MYBABY_WRITES_FROZEN === 'true' && path.startsWith('/api/')
+    && !path.startsWith('/api/auth/') && !['GET','HEAD','OPTIONS'].includes(request.method)) {
+    return NextResponse.json({error:'writes_frozen'},{status:503,headers:{'Cache-Control':'no-store','Retry-After':'60'}})
+  }
+  // Agent, operations and temporary migration routes authenticate independent service tokens.
+  if (path === '/login' || path === '/api/auth/login' || path === '/api/auth/logout' || path === '/api/agent/v1' || path === '/api/ops/health' || path === '/api/migration/copy-media' || path === '/api/migration/cleanup-test-media') {
     return isolate(NextResponse.next())
   }
   const config = authConfig()

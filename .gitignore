@@ -20,6 +20,7 @@
 /.cloudflare/
 /.migration/
 /public/runtime/
+/acceptance-weixin/dist/
 
 # production
 /build

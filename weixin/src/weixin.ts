@@ -66,7 +66,7 @@ function combineSignals(timeout: AbortSignal, external?: AbortSignal): { signal:
 }
 
 export async function ilinkRequest(base: string, path: string, options: {
-  body?: unknown; token?: string; timeoutMs?: number; signal?: AbortSignal;
+  body?: unknown; token?: string; timeoutMs?: number; signal?: AbortSignal; fetcher?: typeof fetch;
 } = {}): Promise<Record<string, unknown>> {
   const post = options.body !== undefined;
   // A native timeout signal cannot be cancelled after a successful fetch.
@@ -78,7 +78,7 @@ export async function ilinkRequest(base: string, path: string, options: {
   try {
     let response: Response;
     try {
-      response = await fetch(`${trustedBaseUrl(base)}/${path}`, {
+      response = await (options.fetcher ?? fetch)(`${trustedBaseUrl(base)}/${path}`, {
         method: post ? 'POST' : 'GET', headers: headers(post, options.token),
         body: post ? JSON.stringify(options.body) : undefined,
         redirect: 'manual', signal: joined.signal,
@@ -112,9 +112,9 @@ export interface Updates {
 }
 
 export async function getUpdates(base: string, token: string, cursor: string,
-  timeoutMs: number, signal?: AbortSignal): Promise<Updates> {
+  timeoutMs: number, signal?: AbortSignal, fetcher?: typeof fetch): Promise<Updates> {
   const result = await ilinkRequest(base, 'ilink/bot/getupdates', {
-    token, body: { get_updates_buf: cursor, base_info: baseInfo() }, timeoutMs, signal,
+    token, body: { get_updates_buf: cursor, base_info: baseInfo() }, timeoutMs, signal, fetcher,
   });
   if (result.msgs !== undefined && !Array.isArray(result.msgs)) throw new ILinkError('invalid_messages', true);
   return {
@@ -126,9 +126,9 @@ export async function getUpdates(base: string, token: string, cursor: string,
 }
 
 export async function sendText(base: string, token: string, userId: string,
-  contextToken: string, clientId: string, text: string): Promise<void> {
+  contextToken: string, clientId: string, text: string, fetcher?: typeof fetch): Promise<void> {
   await ilinkRequest(base, 'ilink/bot/sendmessage', {
-    token, body: {
+    token, fetcher, body: {
       msg: { from_user_id: '', to_user_id: userId, client_id: clientId,
         message_type: 2, message_state: 2, context_token: contextToken,
         item_list: [{ type: 1, text_item: { text } }] },

@@ -13,6 +13,9 @@ export interface Env {
   MYBABY_AGENT_TOKEN?: string;
   AGENT_WRITES_ENABLED?: string;
   AGENT_TIME_ZONE?: string;
+  // Only the separately named synthetic acceptance Worker supplies this.
+  DEPLOYMENT_KIND?: 'synthetic-acceptance';
+  ILINK_ACCEPTANCE?: DurableObjectNamespace;
 }
 
 // Queue contains references only, never message text or context credentials.

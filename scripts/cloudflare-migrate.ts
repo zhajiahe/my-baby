@@ -43,7 +43,7 @@ async function main(){
   const identity=query([{sql:'SELECT name FROM sqlite_master WHERE type=\'table\' AND name=\'deployment_guard\''}]);
   if(identity[0].results.length){const existing=query([{sql:"SELECT value FROM deployment_guard WHERE name='environment'"}]);
    if(existing[0].results[0]?.value!=='mybaby-cloudflare-migration-test')throw new Error('test_guard_required');}
-  query([{sql:readFileSync('cloudflare/migrations/0001_initial.sql','utf8')}]);console.log('Isolated D1 schema ready.');return;
+  query([{sql:readFileSync('cloudflare/migrations/0001_initial.sql','utf8')},{sql:readFileSync('cloudflare/migrations/0002_media_upload_receipts.sql','utf8')}]);console.log('Isolated D1 schema ready.');return;
  }
  const guard=query([{sql:"SELECT value FROM deployment_guard WHERE name='environment'"}]);
  if(guard[0].results[0]?.value!=='mybaby-cloudflare-migration-test')throw new Error('test_guard_required');
@@ -86,7 +86,7 @@ async function main(){
   return;
  }
  if(command==='import'){
-  if(process.argv.includes('--reset-test-data'))query([...tables].reverse().map(table=>({sql:`DELETE FROM ${table}`})));
+  if(process.argv.includes('--reset-test-data'))query([{sql:'DELETE FROM media_upload_receipts'},...[...tables].reverse().map(table=>({sql:`DELETE FROM ${table}`}))]);
   for(const table of tables){const statements=rows[table].map(row=>{
    const keys=Object.keys(row);if(keys.some(k=>!/^\w+$/.test(k)))throw new Error('invalid_column');
    return {sql:`INSERT INTO ${table} (${keys.map(k=>`"${k}"`).join(',')}) VALUES (${keys.map(()=>'?').join(',')}) ON CONFLICT(id) DO UPDATE SET ${keys.filter(k=>k!=='id').map(k=>`"${k}"=excluded."${k}"`).join(',')}`,

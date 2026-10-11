@@ -41,6 +41,13 @@ test('proxy protects original APIs, cookie cannot authorize service API and writ
   assert.equal(proxy(new NextRequest('https://test/api/baby', { headers: { cookie } })).status, 200)
   assert.equal(proxy(new NextRequest('https://test/api/baby', { method: 'POST', headers: { cookie, origin: 'https://evil' } })).status, 403)
   assert.equal(proxy(new NextRequest('https://test/api/baby', { method: 'POST', headers: { cookie, origin: 'https://test' } })).status, 200)
+  process.env.MYBABY_WRITES_FROZEN='true'
+  try {
+    assert.equal(proxy(new NextRequest('https://test/api/agent/v1',{method:'POST'})).status,503)
+    assert.equal(proxy(new NextRequest('https://test/api/photos/generate-upload-url',{method:'POST',headers:{cookie,origin:'https://test'}})).status,503)
+    assert.equal(proxy(new NextRequest('https://test/api/baby',{headers:{cookie}})).status,200)
+    assert.equal(proxy(new NextRequest('https://test/api/auth/logout',{method:'POST'})).status,200)
+  } finally {delete process.env.MYBABY_WRITES_FROZEN}
   delete process.env.MYBABY_APP_PASSWORD
   assert.equal(proxy(new NextRequest('https://test/api/baby')).status, 503)
 })

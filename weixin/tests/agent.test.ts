@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { calendarDate } from '../../shared/agent.js';
 import { planMessage, AgentError } from '../src/agent.js';
 import { prepareAgentReply, type AgentCheckpoint } from '../src/agent-run.js';
-import { executePlan, formatResults } from '../src/tools.js';
+import { callTool, executePlan, formatResults } from '../src/tools.js';
 
 const config = { apiKey: 'synthetic-key', model: 'meta/muse-spark-1.3-contributor', origin: 'https://mybaby.example',
   token: 't'.repeat(64), writesEnabled: true, timeZone: 'Asia/Shanghai' };
@@ -14,6 +14,13 @@ const writePlan = { version: 1 as const, operations: [{ name: 'create_growth_rec
 const modelResponse = (name = 'create_growth_record', args: unknown = { date: '2026-10-10', weight: 10.5 }) => ({ choices: [{ finish_reason: 'tool_calls',
   message: { tool_calls: [{ type: 'function', function: { name, arguments: JSON.stringify(args) } }] } }] });
 
+test('Workers-compatible manual redirects fail closed without forwarding credentials',async t=>{
+ let calls=0;t.mock.method(globalThis,'fetch',async(_url:string,options:RequestInit)=>{calls++;assert.equal(options.redirect,'manual');return new Response(null,{status:302,headers:{location:'https://untrusted.invalid'}});});
+ await assert.rejects(planMessage({...input,baby,writesEnabled:true},config),(e:unknown)=>e instanceof AgentError&&e.code==='model_http_302'&&!e.retryable);
+ await assert.rejects(callTool(input.identity,'get_baby_summary',{},'scope',config),(e:unknown)=>e instanceof AgentError&&e.code==='business_http_302'&&!e.retryable);
+ assert.equal(calls,2);
+});
+
 test('calendar dates use message time and configured timezone, not retry time', () => {
   assert.equal(calendarDate(input.receivedAt), '2026-10-10');
   assert.equal(calendarDate(input.receivedAt, 'UTC'), '2026-10-09');
@@ -22,7 +29,7 @@ test('calendar dates use message time and configured timezone, not retry time', 
 test('model request is bounded, fixed provider URL and never contains authorization identity', async t => {
   t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
     assert.equal(url, 'https://openrouter.ai/api/v1/chat/completions');
-    assert.equal(options.redirect, 'error');
+    assert.equal(options.redirect, 'manual');
     const body = JSON.parse(options.body as string);
     assert.equal(body.model, config.model); assert.equal(body.max_tokens, 2048);
     assert.ok(body.messages[0].content.includes('2026-10-10'));

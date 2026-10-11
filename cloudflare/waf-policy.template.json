@@ -1,0 +1,9 @@
+{
+ "name":"mybaby-production-edge-guard",
+ "kind":"zone",
+ "phase":"http_ratelimit",
+ "rules":[
+  {"description":"Family login edge burst guard; application memory limiter is not globally authoritative","expression":"(http.host eq \"REPLACE_APPROVED_PRODUCTION_HOST\" and http.request.method eq \"POST\" and http.request.uri.path eq \"/api/auth/login\")","action":"block","ratelimit":{"characteristics":["cf.colo.id","ip.src"],"period":60,"requests_per_period":10,"mitigation_timeout":600}},
+  {"description":"Presign endpoint burst guard; never challenge S3 PUT or service API with browser JS","expression":"(http.host eq \"REPLACE_APPROVED_PRODUCTION_HOST\" and http.request.method eq \"POST\" and http.request.uri.path eq \"/api/photos/generate-upload-url\")","action":"block","ratelimit":{"characteristics":["cf.colo.id","ip.src"],"period":60,"requests_per_period":30,"mitigation_timeout":60}}
+ ]
+}

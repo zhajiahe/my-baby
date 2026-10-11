@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo } from 'react'
+import { useCallback, useEffect, useState, useMemo, useRef } from 'react'
 
 // 事件发射器用于缓存同步
 class CacheEventEmitter {
@@ -25,6 +25,17 @@ class CacheManager {
   private cache = new Map<string, { data: unknown; timestamp: number; loading: boolean }>()
   private eventEmitter = new CacheEventEmitter()
   private defaultDuration = 5 * 60 * 1000 // 5分钟
+  private pending = new Map<string, Promise<unknown>>()
+
+  async load<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+    const current = this.pending.get(key)
+    if (current) return current as Promise<T>
+    const promise = Promise.resolve().then(fetcher)
+    this.pending.set(key, promise)
+    this.setLoading(key, true)
+    try { const result = await promise; this.set(key, result); return result }
+    finally { this.pending.delete(key); this.setLoading(key, false) }
+  }
 
   get<T>(key: string, duration?: number): T | null {
     const cached = this.cache.get(key)
@@ -32,7 +43,6 @@ class CacheManager {
     
     const maxAge = duration || this.defaultDuration
     if (Date.now() - cached.timestamp > maxAge) {
-      this.cache.delete(key)
       return null
     }
     
@@ -62,15 +72,17 @@ class CacheManager {
         loading
       })
     }
+    this.eventEmitter.emit(key)
   }
 
   isLoading(key: string): boolean {
     return this.cache.get(key)?.loading || false
   }
 
-  invalidate(key: string) {
+  invalidate(key: string, refetch = true) {
     this.cache.delete(key)
     this.eventEmitter.emit(key)
+    if (refetch) this.eventEmitter.emit(`${key}:invalidate`)
   }
 
   // 支持模式匹配的批量失效
@@ -131,8 +143,10 @@ export function useCache<T>(
   } = {}
 ) {
   const { duration, autoRefresh = true, dependencies = [], staleWhileRevalidate = true } = options
-  const [data, setData] = useState<T | null>(null)
-  const [loading, setLoading] = useState(false)
+  const fetcherRef = useRef(fetcher)
+  fetcherRef.current = fetcher
+  const [data, setData] = useState<T | null>(() => cacheManager.get<T>(key, duration))
+  const [loading, setLoading] = useState(() => autoRefresh && cacheManager.get<T>(key, duration) === null)
   const [error, setError] = useState<Error | null>(null)
 
   // 使用 useMemo 创建依赖的稳定引用
@@ -144,6 +158,7 @@ export function useCache<T>(
     
     if (!forceRefresh && cached !== null) {
       setData(cached)
+      setLoading(false)
       return cached
     }
 
@@ -154,21 +169,13 @@ export function useCache<T>(
       // 不设置 loading，后台静默刷新
     }
 
-    // 防止重复请求
-    if (cacheManager.isLoading(key)) {
-      return staleData ?? undefined
-    }
-
     try {
       // 只有没有 stale 数据时才显示 loading
       if (!staleData || forceRefresh) {
         setLoading(true)
       }
       setError(null)
-      cacheManager.setLoading(key, true)
-      
-      const result = await fetcher()
-      cacheManager.set(key, result)
+      const result = await cacheManager.load(key, () => fetcherRef.current())
       setData(result)
       return result
     } catch (err) {
@@ -177,30 +184,31 @@ export function useCache<T>(
       if (!staleData) {
         setError(error)
       }
-      cacheManager.invalidate(key)
+      cacheManager.invalidate(key, false)
       throw error
     } finally {
       setLoading(false)
-      cacheManager.setLoading(key, false)
     }
-  }, [key, fetcher, duration, staleWhileRevalidate])
+  }, [key, duration, staleWhileRevalidate])
 
   // 订阅缓存变化
   useEffect(() => {
     const unsubscribe = cacheManager.subscribe(key, () => {
       const cached = cacheManager.get<T>(key, duration)
-      if (cached !== null) {
-        setData(cached)
-      }
+      if (cached !== null) setData(cached)
+      setLoading(cacheManager.isLoading(key))
     })
 
-    return unsubscribe
-  }, [key, duration])
+    const unsubscribeInvalidation = cacheManager.subscribe(`${key}:invalidate`, () => {
+      if (autoRefresh) void fetch(true).catch(() => {})
+    })
+    return () => { unsubscribe(); unsubscribeInvalidation() }
+  }, [key, duration, autoRefresh, fetch])
 
   // 初始化数据
   useEffect(() => {
     if (autoRefresh) {
-      fetch()
+      void fetch().catch(() => {}) // error is exposed by the hook; no unhandled rejection
     }
   }, [fetch, autoRefresh, depsString])
 
@@ -224,6 +232,7 @@ export function useCacheInvalidation() {
     
     // 失效baby相关的所有缓存
     invalidateBabyData: (babyId: string) => {
+      cacheManager.invalidate('baby')
       cacheManager.invalidatePattern(`baby-${babyId}`)
       cacheManager.invalidatePattern(`growth-records-${babyId}`)
       cacheManager.invalidatePattern(`milestones-${babyId}`)

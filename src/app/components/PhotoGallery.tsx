@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Image from 'next/image'
-import { browserVideo, browserImage } from '@/lib/media-client'
+import { browserVideo, browserImage, normalizeMediaFile } from '@/lib/media-client'
+import { videoMetadata, mediaFetch } from '@/lib/media-metadata'
 import { Calendar, Clock, Upload, X, Trash2, Image as ImageIcon, Film } from 'lucide-react'
 import { useBaby } from '@/hooks/useBaby'
 import { useToastContext } from '@/components/providers/ToastProvider'
@@ -65,6 +66,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     progress: number;
     errorMessage?: string;
     uploadedUrl?: string;
+    uploadedResult?: {url:string;mediaType:'IMAGE'|'VIDEO';format:string;thumbnailUrl:string|null;duration:number|null};
   }
   const [uploadFiles, setUploadFiles] = useState<UploadFileItem[]>([]);
   const [uploadDate, setUploadDate] = useState(new Date().toISOString().split('T')[0]);
@@ -273,7 +275,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     
     const newItems: UploadFileItem[] = [];
     for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+      const file = normalizeMediaFile(files[i]);
       if (file.size > MAX_FILE_SIZE) {
         toast.error('文件过大', `文件 "${file.name}" 超过 ${MAX_FILE_SIZE / (1024 * 1024)}MB 限制`);
         continue;
@@ -283,7 +285,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
         continue;
       }
       newItems.push({
-        id: `${Date.now()}-${i}-${Math.random().toString(36).substr(2, 9)}`,
+        id: crypto.randomUUID(),
         file,
         title: '', // 标题为空，可选填写
         status: 'pending',
@@ -332,67 +334,13 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     thumbnail: Blob | null;
     duration: number | null;
   }> => {
-    return new Promise((resolve) => {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.muted = true;
-      video.playsInline = true;
-      
-      let duration: number | null = null;
-      
-      // 超时处理
-      const timeout = setTimeout(() => {
-        URL.revokeObjectURL(video.src);
-        resolve({ thumbnail: null, duration });
-      }, 10000);
-      
-      video.onloadedmetadata = () => {
-        // 获取时长
-        duration = Number.isFinite(video.duration) ? Math.round(video.duration) : null;
-        // 跳转到第 1 秒或视频中间来生成缩略图
-        video.currentTime = Math.min(1, video.duration / 2);
-      };
-      
-      video.onseeked = () => {
-        clearTimeout(timeout);
-        try {
-          const canvas = document.createElement('canvas');
-          const width = 320;
-          const height = Math.round((video.videoHeight / video.videoWidth) * width) || 180;
-          canvas.width = width;
-          canvas.height = height;
-          
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(video, 0, 0, width, height);
-            canvas.toBlob((blob) => {
-              URL.revokeObjectURL(video.src);
-              resolve({ thumbnail: blob, duration });
-            }, 'image/jpeg', 0.8);
-          } else {
-            URL.revokeObjectURL(video.src);
-            resolve({ thumbnail: null, duration });
-          }
-        } catch (err) {
-          console.error('Failed to generate video thumbnail:', err);
-          URL.revokeObjectURL(video.src);
-          resolve({ thumbnail: null, duration });
-        }
-      };
-      
-      video.onerror = () => {
-        clearTimeout(timeout);
-        URL.revokeObjectURL(video.src);
-        resolve({ thumbnail: null, duration: null });
-      };
-      
-      video.src = URL.createObjectURL(file);
-    });
+    return videoMetadata(file);
   };
 
   // 辅助函数：直接上传到 R2（绕过服务器，解决文件大小限制）
   const uploadDirectToR2 = async (
-    file: File, 
+    file: File,
+    uploadId: string,
     onProgress: (progress: number) => void
   ): Promise<{
     url: string;
@@ -408,13 +356,15 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     const processedType = blob.type;
     const processedFile = new File([blob], file.name, { type: processedType });
     
+    const metadata = isVideo ? await processVideoMetadata(processedFile) : null;
     onProgress(10);
     
     // 步骤1: 获取预签名 URL
-    const urlResponse = await fetch('/api/photos/generate-upload-url', {
+    const urlResponse = await mediaFetch('/api/photos/generate-upload-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        uploadId,
         filename: sanitizeFileName(file.name),
         contentType: processedType,
         size: blob.size,
@@ -431,7 +381,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     onProgress(20);
     
     // 步骤2: 直接上传到 R2
-    const uploadResponse = await fetch(urlData.uploadUrl, {
+    const uploadResponse = await mediaFetch(urlData.uploadUrl, {
       method: 'PUT',
       headers: {
         'Content-Type': urlData.contentType,
@@ -451,22 +401,21 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     
     if (isVideo) {
       // 同时获取视频缩略图和时长（只加载一次视频）
-      const { thumbnail: thumbnailBlob, duration: videoDuration } = await processVideoMetadata(processedFile);
+      const { thumbnail: thumbnailBlob, duration: videoDuration } = metadata!;
       duration = videoDuration;
       
       // 上传缩略图
       if (thumbnailBlob && urlData.thumbnailUploadUrl) {
         try {
-          const thumbResponse = await fetch(urlData.thumbnailUploadUrl, {
+          const thumbResponse = await mediaFetch(urlData.thumbnailUploadUrl, {
             method: 'PUT',
             headers: { 'Content-Type': 'image/jpeg' },
             body: thumbnailBlob,
           });
-          if (thumbResponse.ok) {
-            thumbnailUrl = urlData.thumbnailPublicUrl;
-          }
-        } catch (err) {
-          console.warn('Failed to upload video thumbnail:', err);
+          if (!thumbResponse.ok) throw new Error('视频缩略图上传失败，请重试');
+          thumbnailUrl = urlData.thumbnailPublicUrl;
+        } catch {
+          throw new Error('视频缩略图上传失败，请重试');
         }
       }
       onProgress(90);
@@ -500,6 +449,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     // 逐个上传文件
     for (let i = 0; i < uploadFiles.length; i++) {
       const item = uploadFiles[i];
+      if (item.status === 'success') continue;
       
       // 更新状态为上传中
       setUploadFiles(prev => prev.map(f => 
@@ -508,7 +458,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
 
       try {
         // 直接上传到 R2（绕过服务器）
-        const uploadResult = await uploadDirectToR2(item.file, (progress) => {
+        const uploadResult = item.uploadedResult ?? await uploadDirectToR2(item.file, item.id, (progress) => {
           setUploadFiles(prev => prev.map(f => 
             f.id === item.id ? { ...f, progress } : f
           ));
@@ -516,11 +466,12 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
 
         // 更新进度到 85%
         setUploadFiles(prev => prev.map(f => 
-          f.id === item.id ? { ...f, progress: 85, uploadedUrl: uploadResult.url } : f
+          f.id === item.id ? { ...f, progress: 85, uploadedUrl: uploadResult.url, uploadedResult: uploadResult } : f
         ));
 
         // 保存元数据到数据库
         const mediaDataForDb = {
+          uploadId: item.id,
           babyId: baby.id,
           date: uploadDate,
           title: item.title || '',
@@ -531,7 +482,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
           duration: uploadResult.duration || null,
         };
 
-        const saveResponse = await fetch('/api/photos', {
+        const saveResponse = await mediaFetch('/api/photos', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(mediaDataForDb),
@@ -560,7 +511,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
         try {
           savedItem = JSON.parse(saveResponseText);
         } catch {
-          console.error('Failed to parse save response:', saveResponseText.substring(0, 200));
+          console.error('media_save_invalid_response');
           throw new Error('保存响应格式错误');
         }
         successfulItems.push({
@@ -574,7 +525,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
         ));
 
       } catch (error) {
-        console.error(`Failed to upload ${item.file.name}:`, error);
+        console.error('media_upload_failed');
         
         // 更详细的错误信息处理
         let errorMessage = '上传失败';
@@ -608,8 +559,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     setIsUploading(false);
     
     // 如果全部成功，清空并关闭
-    const hasErrors = uploadFiles.some(f => f.status === 'error');
-    if (!hasErrors && successfulItems.length === uploadFiles.length) {
+    if (successfulItems.length + uploadFiles.filter(f => f.status === 'success').length === uploadFiles.length) {
       setUploadFiles([]);
       setShowUploadForm(false);
     }
@@ -1115,6 +1065,11 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
                 .map((item) => ( // Renamed from photo to item
                 <div
                   key={item.id}
+                  data-testid={`media-card-${item.id}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`查看${item.mediaType === 'VIDEO' ? '视频' : '图片'} ${item.title || ''}`}
+                  onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setSelectedMediaItem(item)}}}
                   onClick={() => setSelectedMediaItem(item)} // Renamed state setter
                   className="cursor-pointer group"
                 >
@@ -1127,8 +1082,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
                         width={500}
                         height={500}
                         onError={(e) => {
-                          console.error('Image failed to load:', item.url);
-                          console.error('Image error event:', e);
+                          console.error('image_load_failed');
                           // Show a placeholder or error state
                           e.currentTarget.style.display = 'none';
                           e.currentTarget.nextElementSibling?.classList.remove('hidden');
@@ -1145,7 +1099,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
                           width={500}
                           height={500}
                           onError={(e) => {
-                            console.error('Video thumbnail failed to load:', item.thumbnailUrl);
+                            console.error('video_thumbnail_load_failed');
                             e.currentTarget.style.display = 'none';
                           }}
                         />

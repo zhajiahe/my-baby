@@ -2,7 +2,7 @@
 
 一个沿用 Next.js 16 App Router + React 19 + TypeScript + Tailwind CSS 的宝宝成长记录应用。
 
-> **Cloudflare 迁移分支**：Web/API 已接入 vinext Workers + D1 + 私有 R2，独立微信桥接保持不变。当前为隔离测试环境，未切生产；视频转码和完整跨浏览器/UI 验收尚未完成。架构、实际测试证据、可重复数据迁移、生产冻结/备份/切换/回滚见 [Cloudflare 迁移手册](docs/CLOUDFLARE_MIGRATION.md)。本分支 `build` 生成 Worker 产物，旧 Vercel/Neon 的部署回滚应使用原分支，不应运行旧的 `db:push`/`db:reset`。
+> **Cloudflare 迁移分支**：Web/API 已接入 vinext Workers + D1 + 私有 R2，独立微信桥接保持不变。当前为隔离测试环境，未切生产；视频转码和完整跨浏览器/UI 验收尚未完成。架构、实际测试证据、可重复数据迁移、生产冻结/备份/切换/回滚见 [Cloudflare 迁移手册](docs/CLOUDFLARE_MIGRATION.md)；用例/版本/费用/Go-No-Go 见 [验收报告](docs/CLOUDFLARE_ACCEPTANCE_REPORT.md)，生产门禁见 [生产准备与回滚门禁](docs/CLOUDFLARE_PRODUCTION_OPERATIONS.md)。本分支 `build` 生成 Worker 产物，旧 Vercel/Neon 的部署回滚应使用原分支，不应运行旧的 `db:push`/`db:reset`。
 
 ## 🌟 功能特色
 

@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useBaby } from '@/hooks/useBaby'
-import { browserImage } from '@/lib/media-client'
+import { browserImage, normalizeMediaFile } from '@/lib/media-client'
+import { mediaFetch } from '@/lib/media-metadata'
 import { useToastContext } from '@/components/providers/ToastProvider'
 import Image from 'next/image'
 import { Baby, X } from 'lucide-react'
@@ -15,6 +16,7 @@ export default function BabyInfo() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null)
   const [isAvatarOperation, setIsAvatarOperation] = useState(false)
+  const avatarUpload = useRef<{file:File;id:string;url?:string}|undefined>(undefined)
   
   const [babyInfo, setBabyInfo] = useState({
     name: '',
@@ -59,30 +61,23 @@ export default function BabyInfo() {
     setUploadingAvatar(true)
     setIsAvatarOperation(true)
     try {
-      const formData = new FormData()
-      formData.append('file', await browserImage(selectedAvatarFile))
-
-      const uploadResponse = await fetch('/api/photos/upload', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!uploadResponse.ok) {
-        throw new Error('头像上传失败')
+      if(avatarUpload.current?.file!==selectedAvatarFile)avatarUpload.current={file:selectedAvatarFile,id:crypto.randomUUID()}
+      const pending=avatarUpload.current!
+      if(!pending.url){
+        const file=await browserImage(normalizeMediaFile(selectedAvatarFile))
+        const signature=await mediaFetch('/api/photos/generate-upload-url',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({uploadId:pending.id,contentType:file.type,size:file.size})})
+        if(!signature.ok)throw new Error('头像签名失败')
+        const signed=await signature.json()
+        const uploaded=await mediaFetch(signed.uploadUrl,{method:'PUT',headers:{'content-type':file.type},body:file})
+        if(!uploaded.ok)throw new Error('头像上传失败')
+        pending.url=signed.publicUrl
       }
-
-      const uploadResult = await uploadResponse.json()
-      
-      await updateBaby({
-        id: baby.id,
-        avatar: uploadResult.url
-      })
+      await updateBaby({id:baby.id,avatar:pending.url})
 
       setShowAvatarUpload(false)
       setSelectedAvatarFile(null)
       toast.success('头像更新成功', '头像已成功更新并保存')
-    } catch (error) {
-      console.error('Avatar upload error:', error)
+    } catch {
       toast.error('头像上传失败', '请检查网络连接后重试')
     } finally {
       setUploadingAvatar(false)
@@ -294,6 +289,7 @@ export default function BabyInfo() {
             {isEditing ? (
               <input
                 type="text"
+                aria-label="宝宝姓名"
                 value={babyInfo.name}
                 onChange={(e) => handleChange('name', e.target.value)}
                 className="input-field"

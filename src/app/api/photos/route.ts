@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, database, bindings } from '@/lib/db'
+import { createMediaOnce, UploadError, uploadIdPattern } from '@/lib/media-upload'
+import { limitedJson } from '@/lib/auth'
 
 export async function GET(request: NextRequest) {
   try {
@@ -47,7 +49,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const data = await request.json()
+    const data = await limitedJson(request) as Record<string, any>
     
     // Validate required fields
     if (!data.babyId) {
@@ -64,8 +66,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Media type is required' }, { status: 400 })
     }
 
-    const mediaItem = await db.mediaItem.create({ // Changed from prisma.photo.create
-      data: {
+    const value = {
         babyId: data.babyId,
         date: new Date(data.date),
         title: data.title || '', // title is optional, default to empty string
@@ -75,14 +76,20 @@ export async function POST(request: NextRequest) {
         format: data.format || null, // e.g., "jpeg", "mp4"
         thumbnailUrl: data.thumbnailUrl || null, // URL of video thumbnail
         duration: data.duration ? Math.round(data.duration) : null, // Video duration in seconds, ensure integer
-      },
-    })
-
-    return NextResponse.json(mediaItem, { status: 201 }) // Changed from photo
+    }
+    if(data.uploadId){
+      if(!uploadIdPattern.test(data.uploadId)||!['jpg','png','gif','webp','mp4','webm'].includes(data.format)||
+        data.url!==`/api/media/uploads/${data.uploadId}.${data.format}`||
+        (data.thumbnailUrl&&data.thumbnailUrl!==`/api/media/uploads/${data.uploadId}-thumb.jpg`))throw new UploadError('invalid_upload_reference',400)
+      const {MEDIA}=await bindings()
+      if(!await MEDIA.head(`uploads/${data.uploadId}.${data.format}`)||
+        (data.thumbnailUrl&&!await MEDIA.head(`uploads/${data.uploadId}-thumb.jpg`)))throw new UploadError('upload_not_complete',409)
+    }
+    const mediaItem=data.uploadId?await createMediaOnce(await database(),data.uploadId,value):await db.mediaItem.create({data:value})
+    return NextResponse.json(mediaItem, { status: mediaItem.replayed?200:201 }) // Changed from photo
   } catch (error) {
-    console.error('Error creating media item:', error) // Changed from photo
-    console.error('Error details:', error instanceof Error ? error.message : 'Unknown error')
-    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace')
+    if(error instanceof UploadError)return NextResponse.json({error:error.code},{status:error.status})
+    console.error('media_create_failed')
     return NextResponse.json({ error: 'Failed to create media item' }, { status: 500 }) // Changed from photo
   }
 } 

@@ -19,7 +19,16 @@
     "deploy:cloudflare:test": "tsx scripts/cloudflare-test-deploy.ts",
     "migration": "tsx scripts/cloudflare-migrate.ts",
     "test:cloudflare": "tsx scripts/cloudflare-http-smoke.ts",
-    "test:cloudflare:agent": "tsx scripts/cloudflare-agent-smoke.ts"
+    "test:cloudflare:agent": "tsx scripts/cloudflare-agent-smoke.ts",
+    "test:e2e:fixtures": "tsx scripts/prepare-e2e-fixtures.ts",
+    "test:e2e:seed": "tsx scripts/e2e-seed.ts",
+    "test:e2e": "playwright test",
+    "deploy:weixin:acceptance": "tsx scripts/weixin-acceptance-deploy.ts",
+    "test:weixin:acceptance": "tsx scripts/weixin-acceptance-smoke.ts",
+    "monitor:cloudflare:test": "tsx scripts/monitor-test.ts",
+    "rollback:cloudflare:test": "tsx scripts/rollback-test-rehearsal.ts",
+    "cleanup:cloudflare:test:media": "tsx scripts/cleanup-test-media.ts",
+    "acceptance:report": "tsx scripts/acceptance-report.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.828.0",
@@ -40,6 +49,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "^2.0.0-beta.sha-91c870c02",
     "@cloudflare/workers-types": "^5.20261010.1",
+    "@playwright/test": "^1.64.0",
     "@tailwindcss/postcss": "^4.1.8",
     "@types/node": "^22",
     "@types/react": "^19.2.7",

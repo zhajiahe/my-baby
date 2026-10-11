@@ -11,6 +11,8 @@ import { useBaby } from '@/hooks/useBaby'
 import { useDashboardPreloader, useSmartPreloader } from '@/hooks/useDataPreloader'
 
 export default function Home() {
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => { setHydrated(true) }, [])
   const [activeTab, setActiveTab] = useState('dashboard')
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set(['dashboard']))
   const { baby } = useBaby()
@@ -57,8 +59,8 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen">
-      <Navigation activeTab={activeTab} setActiveTab={handleTabChange} />
+    <div className="min-h-screen" data-testid="app-shell" data-hydrated={hydrated}>
+      <Navigation ready={hydrated} activeTab={activeTab} setActiveTab={handleTabChange} />
       <main className="main-content container mx-auto px-3 md:px-4 py-4 md:py-8">
         {/* 使用CSS控制显示隐藏，避免组件重新挂载 */}
         <div className={activeTab === 'dashboard' ? 'block' : 'hidden'}>

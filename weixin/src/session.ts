@@ -29,6 +29,11 @@ export class WeixinSession {
     )`);
   }
 
+  private testTransport(): typeof fetch | undefined {
+    if(this.env.DEPLOYMENT_KIND !== 'synthetic-acceptance' || !this.env.ILINK_ACCEPTANCE)return undefined;
+    const stub=this.env.ILINK_ACCEPTANCE.get(this.env.ILINK_ACCEPTANCE.idFromName('synthetic'));
+    return (input,init)=>stub.fetch(input,init);
+  }
   private config(): SessionConfig | undefined { return this.ctx.storage.kv.get<SessionConfig>('config'); }
   private save(config: SessionConfig): void { this.ctx.storage.kv.put('config', config); }
   private current(generation: number): SessionConfig | undefined {
@@ -47,6 +52,10 @@ export class WeixinSession {
     if (!await authorized(request, this.env.WEIXIN_ADMIN_TOKEN)) return json({ error: 'unauthorized' }, 401);
     const path = new URL(request.url).pathname;
     if (path === '/status' && request.method === 'GET') return this.status();
+    if(path === '/acceptance-debug' && this.env.DEPLOYMENT_KIND === 'synthetic-acceptance')return json({
+      errors:this.ctx.storage.sql.exec('SELECT state,error,COUNT(*) AS count FROM events GROUP BY state,error').toArray(),
+      checkpoints:this.ctx.storage.sql.exec('SELECT COUNT(*) AS count FROM agent_runs').toArray(),
+    });
     if (request.method !== 'POST') return json({ error: 'not_found' }, 404);
     if (path === '/bind') {
       if (ACTIVE.has(this.config()?.state ?? '')) return json({ error: 'pause_before_binding' }, 409);
@@ -161,7 +170,7 @@ export class WeixinSession {
       await this.flush(generation);
       if (!this.current(generation)) return;
       const result = await getUpdates(c.apiBaseUrl, this.env.WEIXIN_BOT_TOKEN,
-        c.cursor, c.pollTimeoutMs, controller.signal);
+        c.cursor, c.pollTimeoutMs, controller.signal, this.testTransport());
       const messages: Array<{ id: string; messageId: string; userId: string; text: string; contextToken: string; receivedAt: number }> = [];
       const reception = this.ctx.storage.kv.get<{ received: number; accepted: number; rejected: Record<string, number> }>('reception')
         ?? { received: 0, accepted: 0, rejected: {} };
@@ -254,7 +263,10 @@ export class WeixinSession {
           reply = await prepareAgentReply({ identity: { source: 'weixin', botId: c.botId,
             userId: row.user_id, messageId: row.message_id || id }, text: row.text, receivedAt: row.received_at }, {
             apiKey: this.env.OPENROUTER_API_KEY ?? '', model: this.env.OPENROUTER_MODEL,
-            origin: this.env.MYBABY_API_ORIGIN ?? '', token: this.env.MYBABY_AGENT_TOKEN ?? '',
+            onUsage:this.env.DEPLOYMENT_KIND==='synthetic-acceptance'?async usage=>{
+              await this.testTransport()!('https://synthetic/acceptance/model-usage',{method:'POST',body:JSON.stringify(usage)});
+            }:undefined,
+            origin: this.env.MYBABY_API_ORIGIN ?? '', token: this.env.MYBABY_AGENT_TOKEN ?? '', fetcher:this.testTransport(),
             writesEnabled: this.env.AGENT_WRITES_ENABLED === 'true', timeZone: this.env.AGENT_TIME_ZONE ?? 'Asia/Shanghai',
           }, checkpoint, persist, guard);
         } catch (error) {
@@ -272,7 +284,7 @@ export class WeixinSession {
       }
       guard();
       await sendText(c.apiBaseUrl, this.env.WEIXIN_BOT_TOKEN, row.user_id,
-        row.context_token, `mybaby_${id}`, reply);
+        row.context_token, `mybaby_${id}`, reply, this.testTransport());
       this.terminal(id, 'done');
       return json({ state: 'done' });
     } catch (error) {

@@ -1,0 +1,4 @@
+[
+ {"name":"example.heic","url":"https://raw.githubusercontent.com/strukturag/libheif/master/examples/example.heic","sha256":"7f8b363e4936c0666a25f64f3a92fda10bd8e5453be4592530b65a55dd98f3f2","bytes":718114,"source":"libheif public example; not an iPhone fixture"},
+ {"name":"flower.mp4","url":"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4","sha256":"0cd83d944a6ca7822b4a8306cecc60a36e859b041f6702c6a1ad9ead78924451","bytes":1128375,"source":"MDN CC0 public example; not an iPhone fixture"}
+]

@@ -5,8 +5,9 @@ import {readFileSync} from 'node:fs';
 import {repository,type Database,type Statement,type SQLValue} from '../src/lib/d1-repository';
 import {d1Store} from '../src/lib/agent/d1-store';
 import {executeOperation} from '../src/lib/agent/service';
+import {createMediaOnce} from '../src/lib/media-upload';
 function harness(){
- const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('cloudflare/migrations/0001_initial.sql','utf8'));
+ const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('cloudflare/migrations/0001_initial.sql','utf8'));sqlite.exec(readFileSync('cloudflare/migrations/0002_media_upload_receipts.sql','utf8'));
  const pending=new WeakMap<Statement,()=>unknown>();
  const db:Database={prepare(sql){let values:SQLValue[]=[];const native=sqlite.prepare(sql);const stmt:Statement={
   bind(...v){values=v;return stmt;},async all<T>(){return {results:native.all(...values) as T[]};},
@@ -16,6 +17,15 @@ function harness(){
    catch(error){sqlite.exec('ROLLBACK');throw error;}}};
  const repo=repository(db);return {db,repo,sqlite,store:d1Store(db)};
 }
+test('media retry after lost response commits once; conflicts and deleted replay fail closed',async()=>{
+ const h=await setup();try{
+  const id=crypto.randomUUID(),data={babyId:'baby',date:new Date('2026-10-10'),title:'synthetic',url:`/api/media/uploads/${id}.png`,mediaType:'IMAGE',format:'png'};
+  const results=await Promise.all(Array.from({length:5},()=>createMediaOnce(h.db,id,data)));
+  assert.equal(new Set(results.map(r=>r.id)).size,1);assert.equal(await h.repo.mediaItem.count(),1);
+  await assert.rejects(createMediaOnce(h.db,id,{...data,title:'changed'}),/upload_payload_conflict/);
+  await h.repo.mediaItem.delete({where:{id}});await assert.rejects(createMediaOnce(h.db,id,data),/upload_already_deleted/);
+ }finally{h.sqlite.close();}
+});
 const grants=JSON.stringify([{source:'weixin',botId:'bot',userId:'allowed',babyId:'baby'}]);
 const request={source:'weixin',botId:'bot',userId:'allowed',messageId:'msg',operationKey:'op_0',operation:'create_growth_record',args:{date:'2026-10-10',weight:10.5}};
 async function setup(){const h=harness();await h.repo.baby.create({data:{id:'baby',name:'Synthetic',birthDate:new Date('2025-01-01'),gender:'boy'}});return h;}

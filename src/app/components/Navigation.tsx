@@ -4,6 +4,7 @@ import { Home, TrendingUp, Award, Camera, type LucideIcon } from 'lucide-react'
 import { LogoutButton } from '@/components/ui/LogoutButton'
 
 interface NavigationProps {
+  ready: boolean
   activeTab: string
   setActiveTab: (tab: string) => void
 }
@@ -21,7 +22,7 @@ const navItems: NavItem[] = [
   { id: 'photos', label: '照片墙', icon: Camera },
 ]
 
-export default function Navigation({ activeTab, setActiveTab }: NavigationProps) {
+export default function Navigation({ ready, activeTab, setActiveTab }: NavigationProps) {
   return (
     <>
       {/* 桌面端顶部导航 */}
@@ -39,6 +40,8 @@ export default function Navigation({ activeTab, setActiveTab }: NavigationProps)
                 return (
                   <button
                     key={item.id}
+                    disabled={!ready}
+                    aria-current={activeTab === item.id ? 'page' : undefined}
                     onClick={() => setActiveTab(item.id)}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-200 ${
                       activeTab === item.id
@@ -73,6 +76,8 @@ export default function Navigation({ activeTab, setActiveTab }: NavigationProps)
             return (
               <button
                 key={item.id}
+                disabled={!ready}
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => setActiveTab(item.id)}
                 className={`flex flex-col items-center justify-center gap-0.5 transition-all duration-200 ${
                   isActive

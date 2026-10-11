@@ -1,5 +1,11 @@
 'use client';
 // Browser-only processing. No Sharp, native FFmpeg, shell, filesystem or VPS.
+export function normalizeMediaFile(file:File):File{
+ if(file.type)return file;
+ const ext=file.name.split('.').pop()?.toLowerCase();
+ const types:Record<string,string>={heic:'image/heic',heif:'image/heif',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp',avif:'image/avif',mp4:'video/mp4',m4v:'video/mp4',webm:'video/webm',mov:'video/quicktime'};
+ return ext&&types[ext]?new File([file],file.name,{type:types[ext]}):file;
+}
 export async function browserImage(file:File):Promise<File>{
  if(/\.(heic|heif)$/i.test(file.name)||file.type.includes('heic')||file.type.includes('heif')){
   const {default:convert}=await import('heic2any');

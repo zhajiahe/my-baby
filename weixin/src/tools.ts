@@ -1,7 +1,7 @@
 import { isWrite, type AgentIdentity, type AgentPlan, type BabySummary } from '../../shared/agent.js';
 import { AgentError } from './agent.js';
 
-export interface ToolConfig { origin: string; token: string; writesEnabled: boolean }
+export interface ToolConfig { origin: string; token: string; writesEnabled: boolean; fetcher?: typeof fetch }
 export interface ToolResult { operation: string; baby: BabySummary; data: Record<string, unknown>; replayed?: boolean }
 
 function apiUrl(origin: string): string {
@@ -17,8 +17,10 @@ export async function callTool(identity: AgentIdentity, operation: string, args:
   if (!config.token || config.token.length < 32) throw new AgentError('missing_mybaby_token');
   let response: Response;
   try {
-    response = await fetch(apiUrl(config.origin), {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000),
+    response = await (config.fetcher ?? fetch)(apiUrl(config.origin), {
+      // Workers accepts manual/follow, not Node's redirect:'error'. Reject 3xx
+      // below without forwarding the service bearer to a redirect target.
+      method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(15_000),
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.token}` },
       body: JSON.stringify({ ...identity, operation, operationKey, args }),
     });

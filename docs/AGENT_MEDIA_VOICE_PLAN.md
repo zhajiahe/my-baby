@@ -7,7 +7,7 @@
 | 能力 | 状态 | 位置 / 阻塞 |
 | --- | --- | --- |
 | 相册只读查询（`list_media_items`、`get_album_summary`） | ✅ 已实现 + 真实云端验证 | `shared/agent.ts`、`src/lib/agent/*`；不返回私有链接 |
-| 接收诊断细分（voice/image 分开计数） | ✅ 已实现，零行为变更 | `weixin/src/weixin.ts`，见 §2.1 |
+| 接收诊断细分（voice/image 分开计数） | ✅ 已实现 + **已实测确认媒体到达** | `weixin/src/weixin.ts`，结果见 §2.1 |
 | 语音转写（ASR 客户端 + 管线） | ✅ 已实现（除下载外全链路） | `weixin/src/asr.ts`、`weixin/src/media.ts` |
 | 语音下载 + AES 解密 | ❌ 未实现 | 需真实语音样本确认 `voice_item` 结构；现为 fail-closed stub |
 | 语音接入 DO 事件流 | ❌ 未接入 | 下载可用前接入只会回“读不了语音” |
@@ -24,19 +24,26 @@
 
 ## 2. 取样 Spike（分两步；第一步现在零风险可做）
 
-### 2.1 先确认媒体到底有没有到达 Bot（已具备条件）
+### 2.1 第一步已完成（2026-10-11）：媒体确实到达 Bot
 
-非文本拒绝原因已按类型细分，且**不改变任何处理行为**。所以：
+实测环境：桥接 `ce0c69f9`，`adapterVersion 0.1.4`（该标记用于自证线上 DO 实际在跑哪份代码），真实微信发送 1 条语音 + 1 张照片。
 
-1. 经批准后部署带细分计数的桥接（会重启 DO：先 `pause`、等旧实例退出、再 `start`）。
-2. 你和老婆各发 1 条语音 + 1 张照片。
-3. `cd weixin && npm run session -- status`，看 `reception.rejected`。
+| 指标 | 值 |
+| --- | --- |
+| `received` | 18 → **20**（正好 2 条） |
+| `accepted` | 15（未变：两条均未按文本接受） |
+| `rejected.non_text_message` | **2**（部署前的历史值，**完全不再增长**） |
+| `rejected.voice_message` | **1** |
+| `rejected.image_message` | **1** |
+| `failedCycles` / `lastError` | 0 / null |
 
-判定：
+结论：
 
-- 出现 `voice_message` / `image_message` → 媒体确实到达 Bot，可以进入 2.2。
-- 完全没有 → 服务端没有下发媒体消息，后面所有设计都不成立，**先查通道，不要先写解析代码**。
-- 出现 `unsupported_media_type` → 收到的是视频/文件等其它类型，需重新确认协议假设。
+- **语音与图片都真实到达 Bot**，且类型号与官方协议假设一致（图片 `type=2`、语音 `type=3`）。“服务端不下发媒体消息”这个风险排除，§3/§4 的方案成立。
+- `non_text_message` 在部署后不再增长，反向证明新分类确实生效（新代码永远不会返回该原因）。
+- **仍未确认**：`image_item`/`voice_item` 的内部结构（是直链还是 `media+aeskey`），见 2.2。
+
+以后重测的判据：出现 `voice_message`/`image_message` → 到达；出现 `unsupported_media_type` → 类型号与协议假设不符，需改设计；`non_text_message` 增长 → 说明线上跑的仍是旧代码。
 
 ### 2.2 再拿真实 payload 结构（仍未做）
 

@@ -64,3 +64,28 @@ test('D1 relational CRUD, JSON tags, UTC dates, atomic album batch and cascade',
  await h.repo.baby.delete({where:{id:'baby'}});assert.equal(await h.repo.mediaItem.count(),0);assert.equal(await h.repo.milestone.count(),0);
  }finally{h.sqlite.close();}
 });
+
+test('D1 album reads aggregate months, filter by type and never return private URLs',async()=>{
+ const h=await setup();try{
+  const media=(date:string,mediaType:string,format:string)=>({babyId:'baby',date:new Date(`${date}T00:00:00.000Z`),title:'',
+   url:`/api/media/legacy/${date}.${format}`,mediaType,format});
+  await h.repo.createMediaBatch([media('2026-08-01','IMAGE','jpg'),media('2026-09-05','IMAGE','png'),
+   media('2026-10-10','IMAGE','jpg'),media('2026-10-11','VIDEO','mp4'),media('2026-10-12','VIDEO','mp4')]);
+  const read=(operation:string,operationKey:string,args:Record<string,unknown>)=>executeOperation(
+   {...request,operation,operationKey,args},{store:h.store,grants,writesEnabled:false});
+  const list=await read('list_media_items','op_r0',{mediaType:'VIDEO',limit:2});
+  const rows=list.data.records as Record<string,unknown>[];
+  assert.equal(rows.length,2);assert.ok(rows.every(row=>row.mediaType==='VIDEO'));
+  assert.deepEqual(Object.keys(rows[0]).sort(),['date','format','mediaType','title']);
+  assert.ok(!JSON.stringify(list).includes('/api/media'),'album reads must not expose private URLs');
+  const album=await read('get_album_summary','op_r1',{});
+  assert.equal(album.data.total,5);assert.equal(album.data.images,3);assert.equal(album.data.videos,2);
+  assert.equal(album.data.firstDate,'2026-08-01');assert.equal(album.data.latestDate,'2026-10-12');
+  assert.deepEqual(album.data.months,[{month:'2026-10',count:3},{month:'2026-09',count:1},{month:'2026-08',count:1}]);
+  const range=await read('list_media_items','op_r2',{from:'2026-10-01',to:'2026-10-10',limit:30});
+  assert.equal((range.data.records as unknown[]).length,1);
+  // Reads are never receipts and never mutate.
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM agent_operations').get()!.n,0);
+  assert.equal(await h.repo.mediaItem.count(),5);
+ }finally{h.sqlite.close();}
+});

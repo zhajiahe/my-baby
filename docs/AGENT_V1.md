@@ -69,6 +69,8 @@ MYBABY_AGENT_WRITES_ENABLED="false"
 | --- | --- | --- |
 | `get_baby_summary` | `{}` | 名字和出生日期，不返回过敏/备注/媒体链接 |
 | `list_growth_records` | 可选 from/to/limit（最多30） | 日期、体重、身高、头围 |
+| `list_media_items` | 可选 from/to/limit（最多30）/mediaType=`IMAGE`\|`VIDEO` | 日期、类型、格式、标题；**永不返回 `url`/缩略图/任何媒体链接**（私有路径在通道里无用且会泄露） |
+| `get_album_summary` | `{}`（无参数） | 总数、照片数、视频数、最早/最近日期、最近 6 个月的按月计数；求和由服务端完成，模型不做算术 |
 | `create_growth_record` | date、至少一个 weight/height/headCircumference，可选 notes | 实际记录 ID 和测量结果 |
 | `create_milestone` | date/title，可选 description/tags | 实际记录 ID、日期和标题 |
 

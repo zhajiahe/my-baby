@@ -17,6 +17,10 @@ function memoryStore() {
   const store: AgentStore = {
     async baby(babyId) { assert.equal(babyId, 'baby-allowed'); return { name: '测试宝宝', birthDate: '2025-01-01' } },
     async growth(babyId) { assert.equal(babyId, 'baby-allowed'); return records },
+    async media(babyId) { assert.equal(babyId, 'baby-allowed');
+      return [{ date: '2026-10-11T00:00:00.000Z', mediaType: 'IMAGE', format: 'jpg', title: '满月' }] },
+    async album(babyId) { assert.equal(babyId, 'baby-allowed');
+      return { total: 3, images: 2, videos: 1, firstDate: '2026-08-01', latestDate: '2026-10-11', months: [{ month: '2026-10', count: 2 }] } },
     async findReceipt(key) { return receipts.get(keyOf(key)) ?? null },
     async transaction(fn) {
       const writes: Record<string, unknown>[] = []
@@ -43,6 +47,35 @@ function memoryStore() {
   }
   return { store, records, failReceipt(value: boolean) { failReceipt = value } }
 }
+
+test('album reads are bounded, require no write switch and never expose media URLs', async () => {
+  const { store, records } = memoryStore()
+  const list = await executeOperation({ ...request, operation: 'list_media_items', operationKey: 'op_0', args: { limit: 5, mediaType: 'IMAGE' } },
+    { store, grants, writesEnabled: false })
+  assert.equal(list.operation, 'list_media_items'); assert.equal(list.baby.name, '测试宝宝')
+  assert.equal((list.data.records as unknown[]).length, 1)
+  assert.ok(!JSON.stringify(list).includes('/api/media'), 'private media URLs must never reach the channel')
+  const album = await executeOperation({ ...request, operation: 'get_album_summary', operationKey: 'op_1', args: {} },
+    { store, grants, writesEnabled: false })
+  assert.deepEqual(album.data, { total: 3, images: 2, videos: 1, firstDate: '2026-08-01', latestDate: '2026-10-11', months: [{ month: '2026-10', count: 2 }] })
+  assert.equal(records.length, 0, 'reads must never mutate')
+})
+
+test('album arguments reject unbounded, mistyped, reversed-range and unknown fields', () => {
+  const call = (operation: string, args: unknown) => () => validateRequest({ ...request, operation, args })
+  assert.throws(call('list_media_items', { limit: 31 }))
+  assert.throws(call('list_media_items', { limit: 0 }))
+  assert.throws(call('list_media_items', { limit: 1.5 }))
+  assert.throws(call('list_media_items', { mediaType: 'AUDIO' }))
+  assert.throws(call('list_media_items', { from: '2026-02-30' }))
+  assert.throws(call('list_media_items', { from: '2026-10-10', to: '2026-10-01' }))
+  assert.throws(call('list_media_items', { from: '2026-10-10', url: '/api/media/legacy/x.jpg' }))
+  assert.throws(call('get_album_summary', { from: '2026-10-10' }))
+  assert.throws(call('get_album_summary', { babyId: 'other' }))
+  assert.deepEqual(validateRequest({ ...request, operation: 'list_media_items', args: { limit: 5, mediaType: 'VIDEO' } }).args,
+    { limit: 5, mediaType: 'VIDEO' })
+  assert.deepEqual(validateRequest({ ...request, operation: 'list_media_items', args: {} }).args, { limit: 10 })
+})
 
 test('grants are mandatory, unambiguous and identity-specific; model cannot pass babyId', () => {
   assert.throws(() => resolveGrant(request as never, undefined), (e: unknown) => e instanceof ContractError && e.status === 503)

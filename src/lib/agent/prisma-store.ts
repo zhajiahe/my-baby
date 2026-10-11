@@ -26,6 +26,28 @@ export function prismaStore(db: PrismaClient): AgentStore {
       }, take: args.limit as number, orderBy: [{ date: 'desc' }, { id: 'desc' }], select: growthSelect }))
     },
     findReceipt: key => findReceipt(db, key),
+    async media(babyId, args) {
+      return plain(await db.mediaItem.findMany({ where: { babyId, ...(args.mediaType ? { mediaType: args.mediaType as string } : {}), date: {
+        ...(args.from ? { gte: new Date(`${args.from}T00:00:00.000Z`) } : {}),
+        ...(args.to ? { lt: new Date(new Date(`${args.to}T00:00:00.000Z`).getTime() + 86_400_000) } : {}),
+      } }, take: args.limit as number, orderBy: [{ date: 'desc' }, { id: 'desc' }],
+        select: { date: true, mediaType: true, format: true, title: true } }))
+    },
+    async album(babyId) {
+      const [total, images, videos] = await Promise.all([
+        db.mediaItem.count({ where: { babyId } }), db.mediaItem.count({ where: { babyId, mediaType: 'IMAGE' } }),
+        db.mediaItem.count({ where: { babyId, mediaType: 'VIDEO' } })])
+      if (!total) return { total: 0, images: 0, videos: 0, firstDate: null, latestDate: null, months: [] }
+      const [latest, first, rows] = await Promise.all([
+        db.mediaItem.findFirst({ where: { babyId }, orderBy: [{ date: 'desc' }, { id: 'desc' }], select: { date: true } }),
+        db.mediaItem.findFirst({ where: { babyId }, orderBy: [{ date: 'asc' }, { id: 'asc' }], select: { date: true } }),
+        db.mediaItem.findMany({ where: { babyId }, take: 10_000, orderBy: [{ date: 'desc' }], select: { date: true } })])
+      const counts = new Map<string, number>()
+      for (const row of rows) { const month = row.date.toISOString().slice(0, 7); counts.set(month, (counts.get(month) ?? 0) + 1) }
+      const months = [...counts.entries()].sort((a, b) => a[0] < b[0] ? 1 : -1).slice(0, 6).map(([month, count]) => ({ month, count }))
+      const day = (row: { date: Date } | null) => row ? row.date.toISOString().slice(0, 10) : null
+      return { total, images, videos, firstDate: day(first), latestDate: day(latest), months }
+    },
     transaction: fn => db.$transaction(async tx => fn({
       findReceipt: key => findReceipt(tx, key),
       async mutate(request: AgentRequest, babyId: string) {

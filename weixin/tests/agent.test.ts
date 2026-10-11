@@ -101,3 +101,22 @@ test('resume partial success executes only remaining stable operation', async t 
   const results = await executePlan(input.identity, plan, config, previous, async () => {});
   assert.equal(results.length, 2); assert.ok(formatResults(plan, results).includes('第一次走路'));
 });
+
+test('album replies summarise server-side and never leak private media links', () => {
+  const listPlan = { version: 1 as const, operations: [{ name: 'list_media_items' as const, args: { limit: 2 } }] };
+  const rows = { operation: 'list_media_items', baby, data: { records: [
+    { date: '2026-10-11T00:00:00.000Z', mediaType: 'IMAGE', format: 'jpg', title: '满月' },
+    { date: '2026-10-10T00:00:00.000Z', mediaType: 'VIDEO', format: 'mp4', title: '' }] } };
+  const text = formatResults(listPlan, [rows]);
+  assert.ok(text.includes('照片') && text.includes('视频') && text.includes('满月') && text.includes('2 项'));
+  assert.ok(!text.includes('/api/media') && !text.includes('http'), 'private media links must never reach the channel');
+  assert.ok(formatResults(listPlan, [{ ...rows, data: { records: [] } }]).includes('暂无'));
+
+  const summaryPlan = { version: 1 as const, operations: [{ name: 'get_album_summary' as const, args: {} }] };
+  const summary = formatResults(summaryPlan, [{ operation: 'get_album_summary', baby,
+    data: { total: 3, images: 2, videos: 1, firstDate: '2026-08-01', latestDate: '2026-10-11', months: [{ month: '2026-10', count: 2 }] } }]);
+  assert.ok(summary.includes('3 项') && summary.includes('照片 2 张') && summary.includes('视频 1 个'));
+  assert.ok(summary.includes('2026-10-11') && summary.includes('2026-10：2 项'));
+  assert.ok(formatResults(summaryPlan, [{ operation: 'get_album_summary', baby,
+    data: { total: 0, images: 0, videos: 0, firstDate: null, latestDate: null, months: [] } }]).includes('还是空的'));
+});

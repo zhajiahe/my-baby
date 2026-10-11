@@ -72,6 +72,18 @@ export function formatResults(plan: AgentPlan, results: ToolResult[]): string {
       return `已记录${r.baby.name} ${String(d.date).slice(0, 10)}：${values}。记录 ID：${d.id}`;
     }
     if (r.operation === 'create_milestone') return `已记录${r.baby.name} ${String(d.date).slice(0, 10)}的里程碑：${d.title}。记录 ID：${d.id}`;
+    if (r.operation === 'list_media_items') {
+      const items = Array.isArray(d.records) ? d.records : [];
+      if (!items.length) return `${r.baby.name}在这个时间范围暂无照片或视频。`;
+      return `${r.baby.name}的相册（${items.length} 项）：\n` + items.map(item => [String(item.date).slice(0, 10),
+        item.mediaType === 'VIDEO' ? '视频' : '照片', item.format ? String(item.format) : '', item.title ? String(item.title) : ''].filter(Boolean).join('，')).join('\n');
+    }
+    if (r.operation === 'get_album_summary') {
+      if (!d.total) return `${r.baby.name}的相册还是空的。`;
+      const months = Array.isArray(d.months) ? d.months : [];
+      const head = `${r.baby.name}的相册共有 ${d.total} 项：照片 ${d.images} 张、视频 ${d.videos} 个。最近一次：${String(d.latestDate).slice(0, 10)}。`;
+      return months.length ? head + '\n' + months.map(month => `${month.month}：${month.count} 项`).join('\n') : head;
+    }
     const records = Array.isArray(d.records) ? d.records : [];
     if (!records.length) return `${r.baby.name}在这个时间范围暂无成长记录。`;
     return `${r.baby.name}的成长记录：\n` + records.map(record => [String(record.date).slice(0, 10),

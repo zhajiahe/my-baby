@@ -9,9 +9,17 @@ export interface AgentTransaction {
   mutate(request: AgentRequest, babyId: string): Promise<Record<string, unknown>>
   saveReceipt(key: ReceiptKey, receipt: Receipt): Promise<void>
 }
+export interface AlbumSummary {
+  total: number; images: number; videos: number;
+  firstDate: string | null; latestDate: string | null;
+  months: { month: string; count: number }[];
+}
 export interface AgentStore {
   baby(babyId: string): Promise<BabySummary | null>
   growth(babyId: string, args: AgentRequest['args']): Promise<Record<string, unknown>[]>
+  // Album reads never return media URLs: private links are unusable from the channel and must not leak.
+  media(babyId: string, args: AgentRequest['args']): Promise<Record<string, unknown>[]>
+  album(babyId: string): Promise<AlbumSummary>
   findReceipt(key: ReceiptKey): Promise<Receipt | null>
   transaction<T>(fn: (tx: AgentTransaction) => Promise<T>): Promise<T>
   isUniqueConflict(error: unknown): boolean
@@ -31,6 +39,8 @@ export async function executeOperation(value: unknown, options: {
   if (!baby) throw new ContractError('baby_not_found', 404)
   if (request.operation === 'get_baby_summary') return { operation: request.operation, baby, data: { ...baby } }
   if (request.operation === 'list_growth_records') return { operation: request.operation, baby, data: { records: await options.store.growth(grant.babyId, request.args) } }
+  if (request.operation === 'list_media_items') return { operation: request.operation, baby, data: { records: await options.store.media(grant.babyId, request.args) } }
+  if (request.operation === 'get_album_summary') return { operation: request.operation, baby, data: { ...await options.store.album(grant.babyId) } }
   // Authorize before examining any stored result; hash binds identity, baby and
   // normalized parameters so a reused key cannot expose someone else's data.
   const key: ReceiptKey = { source: request.source, botId: request.botId, messageId: request.messageId, operationKey: request.operationKey }

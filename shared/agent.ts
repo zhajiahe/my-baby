@@ -1,6 +1,6 @@
 // Channel-independent contract. Never allow the model to choose authentication,
 // babyId, message identity or an idempotency key.
-export type OperationName = 'get_baby_summary' | 'list_growth_records' | 'create_growth_record' | 'create_milestone';
+export type OperationName = 'get_baby_summary' | 'list_growth_records' | 'list_media_items' | 'get_album_summary' | 'create_growth_record' | 'create_milestone';
 export type ToolArgs = Record<string, string | number | string[]>;
 export interface PlannedOperation { name: OperationName; args: ToolArgs }
 export interface AgentPlan { version: 1; operations: PlannedOperation[]; clarification?: string }
@@ -43,6 +43,21 @@ export function validateOperation(name: unknown, input: unknown): PlannedOperati
     const limit = args.limit ?? 10;
     if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 30) throw new ContractError('invalid_limit');
     result.limit = limit as number;
+  } else if (name === 'list_media_items') {
+    exact(args, ['from', 'to', 'limit', 'mediaType']);
+    if (args.from !== undefined) result.from = date(args.from);
+    if (args.to !== undefined) result.to = date(args.to);
+    if (result.from && result.to && result.from > result.to) throw new ContractError('invalid_date_range');
+    if (args.mediaType !== undefined) {
+      if (args.mediaType !== 'IMAGE' && args.mediaType !== 'VIDEO') throw new ContractError('invalid_media_type');
+      result.mediaType = args.mediaType;
+    }
+    const mediaLimit = args.limit ?? 10;
+    if (!Number.isInteger(mediaLimit) || (mediaLimit as number) < 1 || (mediaLimit as number) > 30) throw new ContractError('invalid_limit');
+    result.limit = mediaLimit as number;
+  } else if (name === 'get_album_summary') {
+    // No arguments: the rollup is computed server-side so the model never does arithmetic.
+    exact(args, []);
   } else if (name === 'create_growth_record') {
     exact(args, ['date', 'weight', 'height', 'headCircumference', 'notes']);
     result.date = date(args.date);

@@ -14,6 +14,25 @@ export function d1Store(db:Database):AgentStore {
    ...(args.from?{gte:`${args.from}T00:00:00.000Z`}:{}),
    ...(args.to?{lt:new Date(Date.parse(`${args.to}T00:00:00.000Z`)+86400000).toISOString()}:{}),
   }},take:args.limit as number,orderBy:[{date:'desc'},{id:'desc'}],select:{id:true,date:true,weight:true,height:true,headCircumference:true}});},
+  async media(babyId,args) {return repo.mediaItem.findMany({where:{babyId,...(args.mediaType?{mediaType:args.mediaType as string}:{}),date:{
+   ...(args.from?{gte:`${args.from}T00:00:00.000Z`}:{}),
+   ...(args.to?{lt:new Date(Date.parse(`${args.to}T00:00:00.000Z`)+86400000).toISOString()}:{}),
+  }},take:args.limit as number,orderBy:[{date:'desc'},{id:'desc'}],select:{date:true,mediaType:true,format:true,title:true}});},
+  async album(babyId) {
+   const [total,images,videos]=await Promise.all([repo.mediaItem.count({where:{babyId}}),
+    repo.mediaItem.count({where:{babyId,mediaType:'IMAGE'}}),repo.mediaItem.count({where:{babyId,mediaType:'VIDEO'}})]);
+   if(!total)return{total:0,images:0,videos:0,firstDate:null,latestDate:null,months:[]};
+   const [latest,first,rows]=await Promise.all([
+    repo.mediaItem.findFirst({where:{babyId},orderBy:[{date:'desc'},{id:'desc'}],select:{date:true}}),
+    repo.mediaItem.findFirst({where:{babyId},orderBy:[{date:'asc'},{id:'asc'}],select:{date:true}}),
+    // Month rollup is computed here so the model never does arithmetic. Capped at the repository maximum.
+    repo.mediaItem.findMany({where:{babyId},take:10000,orderBy:[{date:'desc'}],select:{date:true}})]);
+   const counts=new Map<string,number>();
+   for(const row of rows){const month=String(row.date).slice(0,7);counts.set(month,(counts.get(month)??0)+1);}
+   const months=[...counts.entries()].sort((a,b)=>a[0]<b[0]?1:-1).slice(0,6).map(([month,count])=>({month,count}));
+   const day=(row:Record<string,unknown>|null)=>row?String(row.date).slice(0,10):null;
+   return{total,images,videos,firstDate:day(first),latestDate:day(latest),months};
+  },
   findReceipt,
   transaction:async()=>{throw new Error('d1_interactive_transactions_unsupported');},
   isUniqueConflict:()=>false,

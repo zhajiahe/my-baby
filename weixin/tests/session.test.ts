@@ -302,3 +302,47 @@ test('Worker health is public, management fails closed, missing references retry
   await worker.queue({ messages: [{ body: { eventId: 'invalid' }, retry() { retries++; } }] } as unknown as MessageBatch<InboxEvent>, env);
   assert.equal(retries, 1);
 });
+
+test('a voice message with a channel transcript becomes a marked event, never a silent drop', async t => {
+  const h = harness(); t.after(() => h.close());
+  (h.env as unknown as Record<string, unknown>).MEDIA_INGEST_ENABLED = 'true';
+  await h.bind();
+  const voice = { ...inbound, message_id: 987,
+    item_list: [{ type: 3, voice_item: { text: '今天身高83cm', media: { full_url: 'https://mmbiz.qpic.cn/v', aes_key: 'k' } } }] };
+  mockUpdates(t, { ret: 0, msgs: [voice], get_updates_buf: 'c1' });
+  await h.session.alarm();
+  const id = await eventId('bot', '987');
+  const row = h.row(id);
+  assert.ok(row, 'a voice with a usable transcript must create an event, not vanish');
+  assert.equal(row.source_kind, 'voice');
+  assert.equal(row.text, '今天身高83cm');
+  console.log('voice event created, queued:', h.queued.length, 'state:', row.state);
+});
+
+test('a voice message without a transcript still produces a reply notice', async t => {
+  const h = harness(); t.after(() => h.close());
+  (h.env as unknown as Record<string, unknown>).MEDIA_INGEST_ENABLED = 'true';
+  await h.bind();
+  const voice = { ...inbound, message_id: 988, item_list: [{ type: 3, voice_item: { playtime: 2000 } }] };
+  mockUpdates(t, { ret: 0, msgs: [voice], get_updates_buf: 'c2' });
+  await h.session.alarm();
+  const id = await eventId('bot', '988');
+  const row = h.row(id);
+  assert.ok(row, 'an unusable voice must still answer instead of staying silent');
+  assert.equal(row.source_kind, 'notice');
+  console.log('notice event created, queued:', h.queued.length, 'text:', row.text.slice(0, 20));
+});
+
+test('reception counters stay consistent for media that is accepted', async t => {
+  const h = harness(); t.after(() => h.close());
+  (h.env as unknown as Record<string, unknown>).MEDIA_INGEST_ENABLED = 'true';
+  await h.bind();
+  const voice = { ...inbound, message_id: 989, item_list: [{ type: 3, voice_item: { text: '今天体重6.5公斤' } }] };
+  mockUpdates(t, { ret: 0, msgs: [voice, { ...inbound, message_id: 990 }], get_updates_buf: 'c3' });
+  await h.session.alarm();
+  const reception = h.kv.get('reception') as { received: number; accepted: number; rejected: Record<string, number> };
+  const rejected = Object.values(reception.rejected).reduce((sum, n) => sum + n, 0);
+  console.log('reception', JSON.stringify(reception));
+  assert.equal(reception.accepted + rejected, reception.received,
+    'accepted + rejected must equal received; a double count means one message was booked twice');
+});

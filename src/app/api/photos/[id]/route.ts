@@ -36,7 +36,13 @@ export async function PUT(
   try {
     const { id } = await params
     const data = await request.json()
-    
+    // Object references and measured media metadata are immutable after publication.
+    const current=await db.mediaItem.findUnique({where:{id}})
+    if(!current)return NextResponse.json({error:'not_found'},{status:404})
+    for(const field of ['url','thumbnailUrl','mediaType','format','duration']){
+      if(data[field]!==undefined&&data[field]!==current[field])return NextResponse.json({error:'immutable_media_reference'},{status:400})
+    }
+    if(data.date&&!Number.isFinite(new Date(data.date).getTime()))return NextResponse.json({error:'invalid_date'},{status:400})
     const mediaItem = await db.mediaItem.update({ // Changed from prisma.photo.update
       where: { id },
       data: {

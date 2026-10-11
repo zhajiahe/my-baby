@@ -47,6 +47,9 @@ test('proxy protects original APIs, cookie cannot authorize service API and writ
     assert.equal(proxy(new NextRequest('https://test/api/photos/generate-upload-url',{method:'POST',headers:{cookie,origin:'https://test'}})).status,503)
     assert.equal(proxy(new NextRequest('https://test/api/baby',{headers:{cookie}})).status,200)
     assert.equal(proxy(new NextRequest('https://test/api/auth/logout',{method:'POST'})).status,200)
+    // Only the independently token-authenticated cleanup route bypasses business freeze.
+    assert.equal(proxy(new NextRequest('https://test/api/migration/cleanup-test-media',{method:'POST'})).status,200)
+    assert.equal(proxy(new NextRequest('https://test/api/migration/copy-media',{method:'POST'})).status,503)
   } finally {delete process.env.MYBABY_WRITES_FROZEN}
   delete process.env.MYBABY_APP_PASSWORD
   assert.equal(proxy(new NextRequest('https://test/api/baby')).status, 503)

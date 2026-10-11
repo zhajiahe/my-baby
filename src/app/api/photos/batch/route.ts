@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, bindings } from '@/lib/db'
+import { limitedJson } from '@/lib/auth'
+import { validateMedia } from '@/lib/media-validation'
+import { UploadError } from '@/lib/media-upload'
 
 interface BatchMediaItemInput {
   babyId: string
@@ -15,10 +18,10 @@ interface BatchMediaItemInput {
 
 export async function POST(request: NextRequest) {
   try {
-    const data = await request.json()
+    const data = await limitedJson(request) as {items: BatchMediaItemInput[]}
     
     // Validate that we have an array of items
-    if (!Array.isArray(data.items) || data.items.length === 0) {
+    if (!Array.isArray(data.items) || data.items.length === 0 || data.items.length > 50) {
       return NextResponse.json(
         { error: 'Items array is required and must not be empty' },
         { status: 400 }
@@ -50,6 +53,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const {MEDIA}=await bindings()
+    for(const item of items)await validateMedia(MEDIA,item)
     // Create all media items in a transaction
     const createdItems = await db.createMediaBatch(items.map(item => ({
       babyId: item.babyId, date: new Date(item.date), title: item.title || '',
@@ -68,8 +73,8 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     )
   } catch (error) {
-    console.error('Error creating media items in batch:', error)
-    console.error('Error details:', error instanceof Error ? error.message : 'Unknown error')
+    if(error instanceof UploadError)return NextResponse.json({error:error.code},{status:error.status})
+    console.error('media_batch_failed')
     return NextResponse.json(
       { error: 'Failed to create media items' },
       { status: 500 }

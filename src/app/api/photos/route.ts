@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, database, bindings } from '@/lib/db'
-import { createMediaOnce, UploadError, uploadIdPattern } from '@/lib/media-upload'
+import { createMediaOnce, UploadError } from '@/lib/media-upload'
+import { validateMedia } from '@/lib/media-validation'
 import { limitedJson } from '@/lib/auth'
 
 export async function GET(request: NextRequest) {
@@ -77,14 +78,8 @@ export async function POST(request: NextRequest) {
         thumbnailUrl: data.thumbnailUrl || null, // URL of video thumbnail
         duration: data.duration ? Math.round(data.duration) : null, // Video duration in seconds, ensure integer
     }
-    if(data.uploadId){
-      if(!uploadIdPattern.test(data.uploadId)||!['jpg','png','gif','webp','mp4','webm'].includes(data.format)||
-        data.url!==`/api/media/uploads/${data.uploadId}.${data.format}`||
-        (data.thumbnailUrl&&data.thumbnailUrl!==`/api/media/uploads/${data.uploadId}-thumb.jpg`))throw new UploadError('invalid_upload_reference',400)
-      const {MEDIA}=await bindings()
-      if(!await MEDIA.head(`uploads/${data.uploadId}.${data.format}`)||
-        (data.thumbnailUrl&&!await MEDIA.head(`uploads/${data.uploadId}-thumb.jpg`)))throw new UploadError('upload_not_complete',409)
-    }
+    const {MEDIA}=await bindings()
+    await validateMedia(MEDIA,data)
     const mediaItem=data.uploadId?await createMediaOnce(await database(),data.uploadId,value):await db.mediaItem.create({data:value})
     return NextResponse.json(mediaItem, { status: mediaItem.replayed?200:201 }) // Changed from photo
   } catch (error) {

@@ -3,13 +3,14 @@ import { S3Client,PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { limitedJson } from '@/lib/auth';
 import { uploadIdPattern } from '@/lib/media-upload';
+import { MAX_MEDIA_BYTES } from '@/lib/media-validation';
 const types:Record<string,string>={'image/jpeg':'jpg','image/png':'png','image/gif':'gif','image/webp':'webp',
- 'video/mp4':'mp4','video/webm':'webm','video/quicktime':'mov'};
+ 'video/mp4':'mp4','video/webm':'webm'};
 export async function POST(request:Request) {
  try {
   const data=await limitedJson(request) as {contentType:string;size?:number;uploadId?:string};
   const format=types[data.contentType]; if(!format)return NextResponse.json({error:'请先在浏览器转换为 JPEG 或兼容视频格式'}, {status:415});
-  if(data.size!==undefined&&(!Number.isSafeInteger(data.size)||data.size<=0||data.size>1024*1024*1024))return NextResponse.json({error:'invalid_size'},{status:400});
+  if(!Number.isSafeInteger(data.size)||!data.size||data.size<=0||data.size>MAX_MEDIA_BYTES)return NextResponse.json({error:'invalid_size'},{status:400});
   const client=new S3Client({region:'auto',endpoint:`https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
    credentials:{accessKeyId:process.env.R2_ACCESS_KEY_ID!,secretAccessKey:process.env.R2_SECRET_ACCESS_KEY!,sessionToken:process.env.R2_SESSION_TOKEN}});
   if(data.uploadId!==undefined&&!uploadIdPattern.test(data.uploadId))return NextResponse.json({error:'invalid_upload_id'},{status:400});

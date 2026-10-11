@@ -11,7 +11,8 @@ export function proxy(request: NextRequest) {
   // Freeze mutations before independent Agent authorization too. Already-issued
   // R2 signatures expire separately; wait their TTL and drain uploads at cutover.
   if(process.env.MYBABY_WRITES_FROZEN === 'true' && path.startsWith('/api/')
-    && !path.startsWith('/api/auth/') && !['GET','HEAD','OPTIONS'].includes(request.method)) {
+    && !path.startsWith('/api/auth/') && path !== '/api/migration/cleanup-test-media'
+    && !['GET','HEAD','OPTIONS'].includes(request.method)) {
     return NextResponse.json({error:'writes_frozen'},{status:503,headers:{'Cache-Control':'no-store','Retry-After':'60'}})
   }
   // Agent, operations and temporary migration routes authenticate independent service tokens.

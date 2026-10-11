@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { db } from '@/lib/db'
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,13 +16,13 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit
     
     const [mediaItems, total] = await Promise.all([
-      prisma.mediaItem.findMany({
+      db.mediaItem.findMany({
         where: { babyId },
         orderBy: { date: 'desc' },
         take: limit,
         skip: skip,
       }),
-      prisma.mediaItem.count({ where: { babyId } })
+      db.mediaItem.count({ where: { babyId } })
     ])
 
     return NextResponse.json({
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Media type is required' }, { status: 400 })
     }
 
-    const mediaItem = await prisma.mediaItem.create({ // Changed from prisma.photo.create
+    const mediaItem = await db.mediaItem.create({ // Changed from prisma.photo.create
       data: {
         babyId: data.babyId,
         date: new Date(data.date),

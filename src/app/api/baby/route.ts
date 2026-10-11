@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { db } from '@/lib/db'
 
 export async function GET() {
   try {
     // For now, we'll get the first baby (single baby app)
     // In a multi-user app, you'd filter by user ID
-    const baby = await prisma.baby.findFirst({
+    const baby = await db.baby.findFirst({
       include: {
         _count: {
           select: {
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
   try {
     const data = await request.json()
     
-    const baby = await prisma.baby.create({
+    const baby = await db.baby.create({
       data: {
         name: data.name,
         birthDate: new Date(data.birthDate),
@@ -94,7 +94,7 @@ export async function PUT(request: NextRequest) {
 
     updateData.updatedAt = new Date()
 
-    const baby = await prisma.baby.update({
+    const baby = await db.baby.update({
       where: { id: data.id },
       data: updateData,
       include: {

@@ -15,6 +15,10 @@ export interface AgentStore {
   findReceipt(key: ReceiptKey): Promise<Receipt | null>
   transaction<T>(fn: (tx: AgentTransaction) => Promise<T>): Promise<T>
   isUniqueConflict(error: unknown): boolean
+  // D1 cannot run an interactive callback transaction. Its implementation
+  // prepares a receipt and mutation offline and commits both in one batch.
+  atomicWrite?(request: AgentRequest, babyId: string, key: ReceiptKey, payloadHash: string, baby: BabySummary):
+    Promise<{ receipt: Receipt; replayed: boolean }>
 }
 
 export async function executeOperation(value: unknown, options: {
@@ -37,6 +41,11 @@ export async function executeOperation(value: unknown, options: {
   }
   const existing = await options.store.findReceipt(key)
   if (existing) return replay(existing)
+  if (options.store.atomicWrite) {
+    const committed = await options.store.atomicWrite(request, grant.babyId, key, payloadHash, baby)
+    if (committed.receipt.payloadHash !== payloadHash) throw new ContractError('idempotency_conflict', 409)
+    return committed.replayed ? replay(committed.receipt) : committed.receipt.result
+  }
   try {
     return await options.store.transaction(async tx => {
       const prior = await tx.findReceipt(key)

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { db } from '@/lib/db'
 
 export async function GET(
   request: NextRequest,
@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const record = await prisma.growthRecord.findUnique({
+    const record = await db.growthRecord.findUnique({
       where: { id },
       include: {
         baby: {
@@ -37,7 +37,7 @@ export async function PUT(
     const { id } = await params
     const data = await request.json()
     
-    const record = await prisma.growthRecord.update({
+    const record = await db.growthRecord.update({
       where: { id },
       data: {
         date: data.date ? new Date(data.date) : undefined,
@@ -61,7 +61,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
-    await prisma.growthRecord.delete({
+    await db.growthRecord.delete({
       where: { id },
     })
 

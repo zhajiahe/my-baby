@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Image from 'next/image'
+import { browserVideo, browserImage } from '@/lib/media-client'
 import { Calendar, Clock, Upload, X, Trash2, Image as ImageIcon, Film } from 'lucide-react'
 import { useBaby } from '@/hooks/useBaby'
 import { useToastContext } from '@/components/providers/ToastProvider'
@@ -322,33 +323,8 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
 
   // 辅助函数：HEIC/HEIF 转换为 JPEG（使用 heic2any 库，动态导入）
   const convertHeicToJpeg = async (file: File): Promise<{ blob: Blob; type: string }> => {
-    // 检查是否是 HEIC/HEIF
-    const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || 
-                   file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
-    
-    if (!isHeic) {
-      const arrayBuffer = await file.arrayBuffer();
-      return { blob: new Blob([arrayBuffer], { type: file.type }), type: file.type };
-    }
-    
-    // 使用 heic2any 库转换 HEIC 到 JPEG（动态导入避免 SSR 问题）
-    try {
-      const heic2any = (await import('heic2any')).default;
-      const convertedBlob = await heic2any({
-        blob: file,
-        toType: 'image/jpeg',
-        quality: 0.85,
-      });
-      
-      // heic2any 可能返回数组（多帧 HEIC），取第一个
-      const resultBlob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
-      return { blob: resultBlob, type: 'image/jpeg' };
-    } catch (error) {
-      console.warn('HEIC conversion failed, attempting fallback:', error);
-      // 降级：直接使用原始文件（某些浏览器可能原生支持）
-      const arrayBuffer = await file.arrayBuffer();
-      return { blob: new Blob([arrayBuffer], { type: file.type }), type: file.type };
-    }
+    const converted = await browserImage(file);
+    return { blob: converted, type: converted.type };
   };
 
   // 辅助函数：处理视频元数据（缩略图 + 时长，只加载一次视频）
@@ -372,7 +348,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
       
       video.onloadedmetadata = () => {
         // 获取时长
-        duration = Math.round(video.duration);
+        duration = Number.isFinite(video.duration) ? Math.round(video.duration) : null;
         // 跳转到第 1 秒或视频中间来生成缩略图
         video.currentTime = Math.min(1, video.duration / 2);
       };
@@ -428,9 +404,9 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     const isVideo = file.type.startsWith('video/');
     
     // 处理文件（HEIC 转换等）
-    const { blob, type: processedType } = isVideo 
-      ? { blob: new Blob([await file.arrayBuffer()], { type: file.type }), type: file.type }
-      : await convertHeicToJpeg(file);
+    const blob = isVideo ? await browserVideo(file) : (await convertHeicToJpeg(file)).blob;
+    const processedType = blob.type;
+    const processedFile = new File([blob], file.name, { type: processedType });
     
     onProgress(10);
     
@@ -441,6 +417,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
       body: JSON.stringify({
         filename: sanitizeFileName(file.name),
         contentType: processedType,
+        size: blob.size,
         isVideo,
       }),
     });
@@ -474,7 +451,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     
     if (isVideo) {
       // 同时获取视频缩略图和时长（只加载一次视频）
-      const { thumbnail: thumbnailBlob, duration: videoDuration } = await processVideoMetadata(file);
+      const { thumbnail: thumbnailBlob, duration: videoDuration } = await processVideoMetadata(processedFile);
       duration = videoDuration;
       
       // 上传缩略图

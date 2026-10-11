@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { db } from '@/lib/db'
 
 interface BatchMediaItemInput {
   babyId: string
@@ -51,23 +51,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Create all media items in a transaction
-    const createdItems = await prisma.$transaction(
-      items.map((item) =>
-        prisma.mediaItem.create({
-          data: {
-            babyId: item.babyId,
-            date: new Date(item.date),
-            title: item.title || '', // Default to empty string if not provided
-            description: item.description || null,
-            url: item.url,
-            mediaType: item.mediaType,
-            format: item.format || null,
-            thumbnailUrl: item.thumbnailUrl || null,
-            duration: item.duration ? Math.round(item.duration) : null,
-          },
-        })
-      )
-    )
+    const createdItems = await db.createMediaBatch(items.map(item => ({
+      babyId: item.babyId, date: new Date(item.date), title: item.title || '',
+      description: item.description || null, url: item.url, mediaType: item.mediaType,
+      format: item.format || null, thumbnailUrl: item.thumbnailUrl || null,
+      duration: item.duration ? Math.round(item.duration) : null,
+    })))
 
     
     return NextResponse.json(

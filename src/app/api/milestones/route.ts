@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { db } from '@/lib/db'
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Baby ID is required' }, { status: 400 })
     }
 
-    const milestones = await prisma.milestone.findMany({
+    const milestones = await db.milestone.findMany({
       where: { babyId },
       orderBy: { date: 'desc' },
     })
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   try {
     const data = await request.json()
     
-    const milestone = await prisma.milestone.create({
+    const milestone = await db.milestone.create({
       data: {
         babyId: data.babyId,
         date: new Date(data.date),

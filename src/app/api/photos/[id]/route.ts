@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { db } from '@/lib/db'
 
 export async function GET(
   request: NextRequest,
@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const mediaItem = await prisma.mediaItem.findUnique({ // Changed from prisma.photo.findUnique
+    const mediaItem = await db.mediaItem.findUnique({ // Changed from prisma.photo.findUnique
       where: { id },
       include: {
         baby: {
@@ -37,7 +37,7 @@ export async function PUT(
     const { id } = await params
     const data = await request.json()
     
-    const mediaItem = await prisma.mediaItem.update({ // Changed from prisma.photo.update
+    const mediaItem = await db.mediaItem.update({ // Changed from prisma.photo.update
       where: { id },
       data: {
         date: data.date ? new Date(data.date) : undefined,
@@ -65,7 +65,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
-    await prisma.mediaItem.delete({ // Changed from prisma.photo.delete
+    await db.mediaItem.delete({ // Changed from prisma.photo.delete
       where: { id },
     })
 

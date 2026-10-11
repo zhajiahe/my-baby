@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { db } from '@/lib/db'
 
 export async function GET(
   request: NextRequest,
@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const milestone = await prisma.milestone.findUnique({
+    const milestone = await db.milestone.findUnique({
       where: { id },
       include: {
         baby: {
@@ -37,7 +37,7 @@ export async function PUT(
     const { id } = await params
     const data = await request.json()
     
-    const milestone = await prisma.milestone.update({
+    const milestone = await db.milestone.update({
       where: { id },
       data: {
         date: data.date ? new Date(data.date) : undefined,
@@ -60,7 +60,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
-    await prisma.milestone.delete({
+    await db.milestone.delete({
       where: { id },
     })
 

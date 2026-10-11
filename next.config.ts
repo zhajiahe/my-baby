@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   images: {
+    // Private media must be fetched by the browser with its family Cookie,
+    // not anonymously by an optimizer/cache.
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: 'https',

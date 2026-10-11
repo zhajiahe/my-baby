@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useBaby } from '@/hooks/useBaby'
+import { browserImage } from '@/lib/media-client'
 import { useToastContext } from '@/components/providers/ToastProvider'
 import Image from 'next/image'
 import { Baby, X } from 'lucide-react'
@@ -59,7 +60,7 @@ export default function BabyInfo() {
     setIsAvatarOperation(true)
     try {
       const formData = new FormData()
-      formData.append('file', selectedAvatarFile)
+      formData.append('file', await browserImage(selectedAvatarFile))
 
       const uploadResponse = await fetch('/api/photos/upload', {
         method: 'POST',

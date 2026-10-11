@@ -13,9 +13,13 @@
 # testing
 /coverage
 
-# next.js
+# next.js / Cloudflare / private migration copies
 /.next/
 /out/
+/dist/
+/.cloudflare/
+/.migration/
+/public/runtime/
 
 # production
 /build
@@ -39,3 +43,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+/dist/
+.vinext/
+.cloudflare/

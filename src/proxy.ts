@@ -3,9 +3,14 @@ import { authConfig, authConfigured, sameOrigin, SESSION_COOKIE, validSession } 
 
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname
-  // The Agent route authenticates its independent service token in the handler.
-  if (path === '/login' || path === '/api/auth/login' || path === '/api/auth/logout' || path === '/api/agent/v1') {
-    return NextResponse.next()
+  const isolate = (response: NextResponse) => {
+    response.headers.set('Cross-Origin-Opener-Policy', 'same-origin')
+    response.headers.set('Cross-Origin-Embedder-Policy', 'require-corp')
+    return response
+  }
+  // Agent and temporary migration routes authenticate independent service tokens.
+  if (path === '/login' || path === '/api/auth/login' || path === '/api/auth/logout' || path === '/api/agent/v1' || path === '/api/migration/copy-media') {
+    return isolate(NextResponse.next())
   }
   const config = authConfig()
   const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' }
@@ -22,7 +27,7 @@ export function proxy(request: NextRequest) {
   const response = NextResponse.next()
   response.headers.set('Cache-Control', 'private, no-store')
   response.headers.set('Vary', 'Cookie')
-  return response
+  return isolate(response)
 }
 
 export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] }

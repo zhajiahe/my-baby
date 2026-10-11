@@ -62,6 +62,22 @@ async function readBounded(response: Response, max: number): Promise<Uint8Array>
   return bytes;
 }
 
+// Bounded, allowlisted download shared by the probe and the real intake path, so
+// both are subject to exactly the same SSRF and size constraints. Throws fixed
+// codes rather than returning raw transport errors.
+export async function downloadImage(url: string, fetcher: typeof fetch = fetch): Promise<Uint8Array> {
+  if (!allowedImageHost(url)) throw new Error('image_host_not_allowed');
+  let response: Response;
+  try {
+    // Workers rejects redirect:'error'; manual lets a 3xx be refused below rather
+    // than followed to an unverified host.
+    response = await fetcher(url, { redirect: 'manual', signal: AbortSignal.timeout(30_000) });
+  } catch { throw new Error('image_fetch_failed'); }
+  if (response.status >= 300 && response.status < 400) { await response.body?.cancel(); throw new Error('image_redirect_refused'); }
+  if (!response.ok) { await response.body?.cancel(); throw new Error(`image_http_${response.status}`); }
+  return readBounded(response, MAX_IMAGE_BYTES);
+}
+
 export async function probeImage(url: string, fetcher: typeof fetch = fetch): Promise<ImageProbe> {
   // The allowlist is enforced before any request leaves the Worker.
   if (!allowedImageHost(url)) return { error: 'image_host_not_allowed', host: registrableHost(url) };

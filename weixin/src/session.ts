@@ -2,6 +2,8 @@ import { authorized, json, readJson } from './http.js';
 import { getUpdates, sendText, incomingText, incomingTextRejection, incomingMedia, eventId, trustedBaseUrl, ILinkError } from './weixin.js';
 import { isInboxEvent, type Env, type SessionConfig, type StoredEvent } from './types.js';
 import { prepareAgentReply, type AgentCheckpoint } from './agent-run.js';
+import { calendarDate } from '../../shared/agent.js';
+import { archiveChannelImage, imageAesKey, imageIntakeReply } from './image-intake.js';
 import { AgentError } from './agent.js';
 import { failureReply, formatResults } from './tools.js';
 import { classifyMediaItems, markTranscript, voiceTranscript } from './media.js';
@@ -9,6 +11,7 @@ import { recordStructure, type StructureSample } from './probe.js';
 import { imageURL, probeImage, type ImageProbe } from './image-probe.js';
 
 const VOICE_UNUSABLE_REPLY = '收到你的语音了，但里面没有可用的文字，请把内容打成文字发我。';
+const IMAGE_UNAVAILABLE_REPLY = '收到照片了，但目前还没开启相册归档，请到网页上传。';
 
 // Voice intake for the poll loop. The channel's own transcript is preferred over
 // ASR: no download, no AES decryption, no audio leaving the deployment. Only the
@@ -44,6 +47,13 @@ export class WeixinSession {
     }
     if (!columns.some(column => column.name === 'source_kind')) {
       ctx.storage.sql.exec("ALTER TABLE events ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'text'");
+    }
+    // A media reference cannot be re-fetched after the poll response is gone, so
+    // for images the URL and its AES key are kept. Only those two short strings are
+    // stored, never the whole unvalidated payload.
+    if (!columns.some(column => column.name === 'media_url')) {
+      ctx.storage.sql.exec("ALTER TABLE events ADD COLUMN media_url TEXT NOT NULL DEFAULT ''");
+      ctx.storage.sql.exec("ALTER TABLE events ADD COLUMN media_key TEXT NOT NULL DEFAULT ''");
     }
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS agent_runs (
       event_id TEXT PRIMARY KEY, checkpoint TEXT NOT NULL
@@ -195,7 +205,7 @@ export class WeixinSession {
       if (!this.current(generation)) return;
       const result = await getUpdates(c.apiBaseUrl, this.env.WEIXIN_BOT_TOKEN,
         c.cursor, c.pollTimeoutMs, controller.signal, this.testTransport());
-      const messages: Array<{ id: string; messageId: string; userId: string; text: string; contextToken: string; receivedAt: number; kind: 'text' | 'voice' | 'notice' }> = [];
+      const messages: Array<{ id: string; messageId: string; userId: string; text: string; contextToken: string; receivedAt: number; kind: 'text' | 'voice' | 'notice' | 'image'; mediaUrl?: string; mediaKey?: string }> = [];
       const reception = this.ctx.storage.kv.get<{ received: number; accepted: number; rejected: Record<string, number>; structure?: StructureSample[]; image_probe?: ImageProbe }>('reception')
         ?? { received: 0, accepted: 0, rejected: {} };
       for (const raw of result.msgs) {
@@ -230,6 +240,27 @@ export class WeixinSession {
             this.ctx.storage.kv.put('reception', reception);
             throw new ILinkError('invalid_message_id', true);
           }
+          // A photo is archived in the consumer, where it has its own lease and
+          // retry, rather than inside the poll loop.
+          if (reason === 'image_message' && this.env.MEDIA_INGEST_ENABLED === 'true') {
+            const media = incomingMedia(raw, c.botId, c.allowedUserIds);
+            const url = media ? imageURL(media.item) : null;
+            const aesKey = media ? imageAesKey(media.item) : null;
+            const configured = Boolean(this.env.MYBABY_API_ORIGIN) && (this.env.MYBABY_AGENT_TOKEN ?? '').length >= 32;
+            if (media && url && aesKey && configured) {
+              reception.accepted++;
+              messages.push({ userId: media.userId, messageId: media.messageId, contextToken: media.contextToken,
+                receivedAt: media.receivedAt, text: '', id: await eventId(c.botId, media.messageId),
+                kind: 'image', mediaUrl: url, mediaKey: aesKey });
+              continue;
+            }
+            if (media) {
+              messages.push({ userId: media.userId, messageId: media.messageId, contextToken: media.contextToken,
+                receivedAt: media.receivedAt, text: IMAGE_UNAVAILABLE_REPLY,
+                id: await eventId(c.botId, media.messageId), kind: 'notice' });
+              continue;
+            }
+          }
           // A voice we could not read still gets an answer instead of silence.
           if (voice && 'unusable' in voice) {
             const media = incomingMedia(raw, c.botId, c.allowedUserIds);
@@ -249,8 +280,8 @@ export class WeixinSession {
         this.observe(true);
         for (const m of messages) {
           this.ctx.storage.sql.exec(`INSERT OR IGNORE INTO events
-            (id,generation,user_id,text,context_token,received_at,message_id,source_kind) VALUES (?,?,?,?,?,?,?,?)`,
-          m.id, generation, m.userId, m.text, m.contextToken, m.receivedAt, m.messageId, m.kind);
+            (id,generation,user_id,text,context_token,received_at,message_id,source_kind,media_url,media_key) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          m.id, generation, m.userId, m.text, m.contextToken, m.receivedAt, m.messageId, m.kind, m.mediaUrl ?? '', m.mediaKey ?? '');
         }
         live.cursor = result.cursor ?? live.cursor;
         live.pollTimeoutMs = result.timeoutMs ?? live.pollTimeoutMs;
@@ -301,8 +332,21 @@ export class WeixinSession {
       agentMode ? 'processing' : 'sending', Date.now() + (agentMode ? 150_000 : LEASE_MS), id);
     try {
       let reply = `微信桥接测试成功，已收到：${row.text.slice(0, 500)}\n当前尚未接入 AI 或成长记录写入。`;
+      if (row.source_kind === 'image') {
+        try {
+          const archived = await archiveChannelImage(row.media_url, row.media_key,
+            { source: 'weixin', botId: c.botId, userId: row.user_id, messageId: row.message_id || id },
+            { origin: this.env.MYBABY_API_ORIGIN ?? '', token: this.env.MYBABY_AGENT_TOKEN ?? '',
+              date: calendarDate(row.received_at, this.env.AGENT_TIME_ZONE ?? 'Asia/Shanghai'), index: 0,
+              fetcher: this.testTransport() });
+          reply = archived.status === 201 ? '照片已存进相册。' : '这张照片已经在相册里了。';
+        } catch (error) {
+          // A failed archive never claims success, and never stores a broken file.
+          reply = imageIntakeReply(error instanceof Error && /^[a-z_0-9]+$/.test(error.message) ? error.message : 'image_archive_failed');
+        }
+      }
       // A fixed notice never enters the agent pipeline.
-      if (row.source_kind === 'notice') reply = row.text;
+      else if (row.source_kind === 'notice') reply = row.text;
       else if (agentMode) {
         const saved = this.ctx.storage.sql.exec<{ checkpoint: string }>('SELECT checkpoint FROM agent_runs WHERE event_id=?', id).toArray()[0];
         const checkpoint: AgentCheckpoint = saved ? JSON.parse(saved.checkpoint) : { results: [] };

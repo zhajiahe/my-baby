@@ -55,8 +55,11 @@ export type StoredEvent = {
   state: 'pending' | 'queued' | 'processing' | 'sending' | 'done' | 'failed' | 'unknown' | 'stale';
   lease_until: number;
   // 'voice' carries a channel transcript and gets a transcript marker in the
-  // reply; 'notice' is a fixed sentence that never enters the agent pipeline.
-  source_kind: 'text' | 'voice' | 'notice';
+  // reply; 'notice' is a fixed sentence that never enters the agent pipeline;
+  // 'image' holds a media reference to be archived by the consumer.
+  source_kind: 'text' | 'voice' | 'notice' | 'image';
+  media_url: string;
+  media_key: string;
 };
 
 export function isInboxEvent(value: unknown): value is InboxEvent {

@@ -1,11 +1,26 @@
 import { authorized, json, readJson } from './http.js';
-import { getUpdates, sendText, incomingText, incomingTextRejection, eventId, trustedBaseUrl, ILinkError } from './weixin.js';
+import { getUpdates, sendText, incomingText, incomingTextRejection, incomingMedia, eventId, trustedBaseUrl, ILinkError } from './weixin.js';
 import { isInboxEvent, type Env, type SessionConfig, type StoredEvent } from './types.js';
 import { prepareAgentReply, type AgentCheckpoint } from './agent-run.js';
 import { AgentError } from './agent.js';
 import { failureReply, formatResults } from './tools.js';
-import { classifyMediaItems } from './media.js';
+import { classifyMediaItems, markTranscript, voiceTranscript } from './media.js';
 import { recordStructure, type StructureSample } from './probe.js';
+
+const VOICE_UNUSABLE_REPLY = '收到你的语音了，但里面没有可用的文字，请把内容打成文字发我。';
+
+// Voice intake for the poll loop. The channel's own transcript is preferred over
+// ASR: no download, no AES decryption, no audio leaving the deployment. Only the
+// transcript is carried forward; media references and AES keys are never stored.
+function voiceIntent(value: unknown, config: SessionConfig, enabled: boolean):
+  { text: string; userId: string; messageId: string; contextToken: string; receivedAt: number } | { unusable: true } | null {
+  if (!enabled) return null;
+  const media = incomingMedia(value, config.botId, config.allowedUserIds);
+  if (!media) return null;
+  const transcript = voiceTranscript(media.item);
+  return transcript ? { text: transcript, userId: media.userId, messageId: media.messageId,
+    contextToken: media.contextToken, receivedAt: media.receivedAt } : { unusable: true };
+}
 
 const RETENTION_MS = 30 * 86_400_000;
 const LEASE_MS = 60_000;
@@ -25,6 +40,9 @@ export class WeixinSession {
     const columns = ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(events)').toArray();
     if (!columns.some(column => column.name === 'message_id')) {
       ctx.storage.sql.exec("ALTER TABLE events ADD COLUMN message_id TEXT NOT NULL DEFAULT ''");
+    }
+    if (!columns.some(column => column.name === 'source_kind')) {
+      ctx.storage.sql.exec("ALTER TABLE events ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'text'");
     }
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS agent_runs (
       event_id TEXT PRIMARY KEY, checkpoint TEXT NOT NULL
@@ -125,8 +143,8 @@ export class WeixinSession {
       'SELECT state, COUNT(*) AS count FROM events GROUP BY state')).map(row => [row.state, row.count]));
     // Bumped whenever observable bridge behaviour changes so a status read can
     // prove which build the live Durable Object actually runs. 0.1.4 added the
-    // per-type reception reasons; 0.1.5 adds the media structure probe.
-    return json({ adapterVersion: '0.1.5', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
+    // per-type reception reasons; 0.1.5 added the media probe; 0.1.6 consumes voice transcripts.
+    return json({ adapterVersion: '0.1.6', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
       lastPollAt: c?.lastPollAt ?? null, lastError: c?.lastError ?? null,
       failures: c?.failures ?? 0, cursorSaved: Boolean(c?.cursor),
       nextAlarmAt: await this.ctx.storage.getAlarm(), events: counts,
@@ -176,12 +194,19 @@ export class WeixinSession {
       if (!this.current(generation)) return;
       const result = await getUpdates(c.apiBaseUrl, this.env.WEIXIN_BOT_TOKEN,
         c.cursor, c.pollTimeoutMs, controller.signal, this.testTransport());
-      const messages: Array<{ id: string; messageId: string; userId: string; text: string; contextToken: string; receivedAt: number }> = [];
+      const messages: Array<{ id: string; messageId: string; userId: string; text: string; contextToken: string; receivedAt: number; kind: 'text' | 'voice' | 'notice' }> = [];
       const reception = this.ctx.storage.kv.get<{ received: number; accepted: number; rejected: Record<string, number>; structure?: StructureSample[] }>('reception')
         ?? { received: 0, accepted: 0, rejected: {} };
       for (const raw of result.msgs) {
         reception.received++;
         const reason = incomingTextRejection(raw, c.botId, c.allowedUserIds);
+        // A voice message whose channel transcript is usable becomes normal text input.
+        const voice = reason === 'voice_message' ? voiceIntent(raw, c, this.env.MEDIA_INGEST_ENABLED === 'true') : null;
+        if (voice && 'text' in voice) {
+          reception.accepted++;
+          messages.push({ ...voice, id: await eventId(c.botId, voice.messageId), kind: 'voice' });
+          continue;
+        }
         if (reason) {
           reception.rejected[reason] = (reception.rejected[reason] ?? 0) + 1;
           // Record field paths for unverified media payloads while the probe is
@@ -196,11 +221,17 @@ export class WeixinSession {
             this.ctx.storage.kv.put('reception', reception);
             throw new ILinkError('invalid_message_id', true);
           }
+          // A voice we could not read still gets an answer instead of silence.
+          if (voice && 'unusable' in voice) {
+            const media = incomingMedia(raw, c.botId, c.allowedUserIds);
+            if (media) messages.push({ userId: media.userId, messageId: media.messageId, contextToken: media.contextToken,
+              receivedAt: media.receivedAt, text: VOICE_UNUSABLE_REPLY, id: await eventId(c.botId, media.messageId), kind: 'notice' });
+          }
           continue;
         }
         reception.accepted++;
         const m = incomingText(raw, c.botId, c.allowedUserIds);
-        if (m) messages.push({ ...m, id: await eventId(c.botId, m.messageId) });
+        if (m) messages.push({ ...m, id: await eventId(c.botId, m.messageId), kind: 'text' });
       }
       const live = this.current(generation);
       if (!live || controller.signal.aborted) return; // Pause/rebind invalidates in-flight response.
@@ -209,8 +240,8 @@ export class WeixinSession {
         this.observe(true);
         for (const m of messages) {
           this.ctx.storage.sql.exec(`INSERT OR IGNORE INTO events
-            (id,generation,user_id,text,context_token,received_at,message_id) VALUES (?,?,?,?,?,?,?)`,
-          m.id, generation, m.userId, m.text, m.contextToken, m.receivedAt, m.messageId);
+            (id,generation,user_id,text,context_token,received_at,message_id,source_kind) VALUES (?,?,?,?,?,?,?,?)`,
+          m.id, generation, m.userId, m.text, m.contextToken, m.receivedAt, m.messageId, m.kind);
         }
         live.cursor = result.cursor ?? live.cursor;
         live.pollTimeoutMs = result.timeoutMs ?? live.pollTimeoutMs;
@@ -261,7 +292,9 @@ export class WeixinSession {
       agentMode ? 'processing' : 'sending', Date.now() + (agentMode ? 150_000 : LEASE_MS), id);
     try {
       let reply = `微信桥接测试成功，已收到：${row.text.slice(0, 500)}\n当前尚未接入 AI 或成长记录写入。`;
-      if (agentMode) {
+      // A fixed notice never enters the agent pipeline.
+      if (row.source_kind === 'notice') reply = row.text;
+      else if (agentMode) {
         const saved = this.ctx.storage.sql.exec<{ checkpoint: string }>('SELECT checkpoint FROM agent_runs WHERE event_id=?', id).toArray()[0];
         const checkpoint: AgentCheckpoint = saved ? JSON.parse(saved.checkpoint) : { results: [] };
         const persist = async (value: AgentCheckpoint) => {
@@ -293,6 +326,8 @@ export class WeixinSession {
         guard();
         this.ctx.storage.sql.exec("UPDATE events SET state='sending', lease_until=? WHERE id=?", Date.now() + LEASE_MS, id);
       }
+      // A transcript is echoed with a marker so a mishearing is visible.
+      if (row.source_kind === 'voice') reply = markTranscript(row.text, reply);
       guard();
       await sendText(c.apiBaseUrl, this.env.WEIXIN_BOT_TOKEN, row.user_id,
         row.context_token, `mybaby_${id}`, reply, this.testTransport());

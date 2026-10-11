@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AsrError, DEFAULT_ASR_MODEL, TRANSCRIPT_MARK, transcribeVoice, validateVoice, voiceFailureReply } from '../src/asr.js';
 import { classifyMediaItems, markTranscript, mediaRejectionReason, unverifiedVoiceSource, voiceToTranscript,
-  voiceUnavailableReply } from '../src/media.js';
+  voiceTranscript, voiceUnavailableReply } from '../src/media.js';
 import { incomingMedia, incomingText, incomingTextRejection } from '../src/weixin.js';
 
 const message = {
@@ -94,6 +94,22 @@ test('the voice pipeline is wired end to end and the unverified download fails c
     (error: unknown) => error instanceof AsrError && error.code === 'voice_download_unimplemented');
   await assert.rejects(voiceToTranscript(source, { kind: 'image', type: 2, item: {} }, { botId: 'bot', userId: 'allowed' }, config),
     (error: unknown) => error instanceof AsrError && error.code === 'not_a_voice_message');
+});
+
+test('the channel transcript is preferred over ASR and is the only field carried forward', () => {
+  const item = { type: 3, voice_item: { text: '  今天 体重 6.5 公斤  ', playtime: 3000,
+    media: { full_url: 'https://cdn.invalid/v', encrypt_query_param: 'cipher', aes_key: 'SUPERSECRET' } } };
+  assert.equal(voiceTranscript(item), '今天 体重 6.5 公斤');
+  for (const missing of [{}, { voice_item: {} }, { voice_item: { text: '' } }, { voice_item: { text: '   ' } },
+    { voice_item: { text: 42 } }, { voice_item: { text: 'x'.repeat(8_001) } }, { voice_item: null }]) {
+    assert.equal(voiceTranscript(missing as Record<string, unknown>), null, `unusable transcript must not be forwarded: ${JSON.stringify(missing)}`);
+  }
+  // Only the transcript travels; the media reference and AES key stay unread.
+  const carried = JSON.stringify(voiceTranscript(item));
+  assert.ok(!carried.includes('SUPERSECRET') && !carried.includes('cipher') && !carried.includes('cdn.invalid'));
+  // A voice reply always carries the transcript marker even when the echo is dropped.
+  const safe = markTranscript('文本', '已处理');
+  assert.ok(safe.startsWith(TRANSCRIPT_MARK) && safe.includes('已处理'));
 });
 
 test('transcripts are marked, failures stay family-readable and nothing leaks internals', () => {

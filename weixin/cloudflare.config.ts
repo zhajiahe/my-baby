@@ -22,6 +22,8 @@ export default defineConfig({
       // Records protocol field paths only (never values) for unverified media
       // payloads. Off unless a deploy explicitly enables it.
       MEDIA_PROBE_ENABLED: bindings.text(process.env.MYBABY_MEDIA_PROBE === 'true' ? 'true' : 'false'),
+      // Consuming channel voice transcripts is off unless a deploy enables it.
+      MEDIA_INGEST_ENABLED: bindings.text(process.env.MYBABY_MEDIA_INGEST === 'true' ? 'true' : 'false'),
       OPENROUTER_API_KEY: bindings.secret(),
       MYBABY_AGENT_TOKEN: bindings.secret(),
     },

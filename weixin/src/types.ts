@@ -17,6 +17,8 @@ export interface Env {
   // Structural probe is off unless a deploy explicitly enables it. It records
   // protocol field paths only, never values.
   MEDIA_PROBE_ENABLED?: string;
+  // Consuming channel voice transcripts is off unless a deploy enables it.
+  MEDIA_INGEST_ENABLED?: string;
   // Only the separately named synthetic acceptance Worker supplies this.
   DEPLOYMENT_KIND?: 'synthetic-acceptance';
   ILINK_ACCEPTANCE?: DurableObjectNamespace;
@@ -52,6 +54,9 @@ export type StoredEvent = {
   received_at: number;
   state: 'pending' | 'queued' | 'processing' | 'sending' | 'done' | 'failed' | 'unknown' | 'stale';
   lease_until: number;
+  // 'voice' carries a channel transcript and gets a transcript marker in the
+  // reply; 'notice' is a fixed sentence that never enters the agent pipeline.
+  source_kind: 'text' | 'voice' | 'notice';
 };
 
 export function isInboxEvent(value: unknown): value is InboxEvent {

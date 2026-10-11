@@ -29,6 +29,16 @@ export function mediaRejectionReason(media: ClassifiedMedia): string {
   return media.kind === 'voice' ? 'voice_message' : 'image_message';
 }
 
+// The channel supplies its own transcript on voice items, so ASR is a fallback
+// rather than the default path. Bounded to the same limit as typed text. Only the
+// transcript is carried forward: media references and AES keys are never persisted.
+export function voiceTranscript(item: Record<string, unknown>): string | null {
+  const voice = item?.voice_item as { text?: unknown } | undefined;
+  if (typeof voice?.text !== 'string') return null;
+  const trimmed = voice.text.trim();
+  return trimmed && trimmed.length <= 8_000 ? trimmed : null;
+}
+
 export interface VoiceClip { audioBase64: string; format: string; durationMs?: number }
 export interface VoiceSourceContext { botId: string; userId: string }
 

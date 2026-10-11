@@ -346,3 +346,23 @@ test('reception counters stay consistent for media that is accepted', async t =>
   assert.equal(reception.accepted + rejected, reception.received,
     'accepted + rejected must equal received; a double count means one message was booked twice');
 });
+
+test('a redelivered message is de-duplicated and therefore answers nothing, by design', async t => {
+  const h = harness(); t.after(() => h.close());
+  (h.env as unknown as Record<string, unknown>).MEDIA_INGEST_ENABLED = 'true';
+  await h.bind();
+  const voice = { ...inbound, message_id: 991, item_list: [{ type: 3, voice_item: { text: '今天身高83cm' } }] };
+  mockUpdates(t, { ret: 0, msgs: [voice], get_updates_buf: 'd1' });
+  await h.session.alarm();
+  assert.equal(h.queued.length, 1, 'the first delivery is queued');
+  // Same message id again: the event primary key already exists, so INSERT OR
+  // IGNORE drops it, the stored event is already done, and nothing is queued.
+  mockUpdates(t, { ret: 0, msgs: [voice], get_updates_buf: 'd2' });
+  await h.session.alarm();
+  const reception = h.kv.get('reception') as { received: number; accepted: number; rejected: Record<string, number> };
+  const rejected = Object.values(reception.rejected).reduce((sum, n) => sum + n, 0);
+  console.log('redelivery: queued total', h.queued.length, '| reception', JSON.stringify(reception));
+  assert.equal(h.queued.length, 1, 'a redelivery must not send a second reply');
+  assert.equal(reception.accepted + rejected, reception.received,
+    'every delivery is still counted exactly once, even when it is de-duplicated');
+});

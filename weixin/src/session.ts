@@ -219,7 +219,11 @@ export class WeixinSession {
           continue;
         }
         if (reason) {
-          reception.rejected[reason] = (reception.rejected[reason] ?? 0) + 1;
+          // The rejection counter is incremented at the point the message is
+          // actually rejected: media that is accepted below must not also be
+          // booked as rejected, which previously made accepted + rejected exceed
+          // received.
+          const countRejected = () => { reception.rejected[reason] = (reception.rejected[reason] ?? 0) + 1; };
           // Record field paths for unverified media payloads while the probe is
           // explicitly enabled. Values are never read or stored.
           if (this.env.MEDIA_PROBE_ENABLED === 'true' && (reason === 'voice_message' || reason === 'image_message')) {
@@ -237,6 +241,7 @@ export class WeixinSession {
           // An otherwise authorized text with an unusable ID must not be
           // acknowledged by advancing the cursor: retain it for recovery.
           if (reason === 'invalid_message_id') {
+            countRejected();
             this.ctx.storage.kv.put('reception', reception);
             throw new ILinkError('invalid_message_id', true);
           }
@@ -255,6 +260,9 @@ export class WeixinSession {
               continue;
             }
             if (media) {
+              // Answered with a notice, but still booked exactly once so that
+              // accepted + rejected always equals received.
+              countRejected();
               messages.push({ userId: media.userId, messageId: media.messageId, contextToken: media.contextToken,
                 receivedAt: media.receivedAt, text: IMAGE_UNAVAILABLE_REPLY,
                 id: await eventId(c.botId, media.messageId), kind: 'notice' });
@@ -264,9 +272,12 @@ export class WeixinSession {
           // A voice we could not read still gets an answer instead of silence.
           if (voice && 'unusable' in voice) {
             const media = incomingMedia(raw, c.botId, c.allowedUserIds);
-            if (media) messages.push({ userId: media.userId, messageId: media.messageId, contextToken: media.contextToken,
-              receivedAt: media.receivedAt, text: VOICE_UNUSABLE_REPLY, id: await eventId(c.botId, media.messageId), kind: 'notice' });
+            if (media) { countRejected(); messages.push({ userId: media.userId, messageId: media.messageId, contextToken: media.contextToken,
+              receivedAt: media.receivedAt, text: VOICE_UNUSABLE_REPLY, id: await eventId(c.botId, media.messageId), kind: 'notice' }); }
+            else countRejected();
+            continue;
           }
+          countRejected();
           continue;
         }
         reception.accepted++;

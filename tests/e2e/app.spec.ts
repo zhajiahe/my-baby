@@ -16,6 +16,20 @@ test.beforeAll(async({browser},info)=>{
 });
 test.beforeEach(async({page,context})=>{await context.addCookies(cookies);await page.goto('/',{waitUntil:'domcontentloaded'});
  await expect(page.getByTestId('app-shell')).toHaveAttribute('data-hydrated','true');});
+test('media APIs reject external references, incomplete objects and spoofed files',async({page})=>{
+ const post=(path:string,data:unknown)=>page.request.post(path,{headers:{origin:target.origin},data});
+ const input={babyId:'e2e-baby',date:'2025-01-01',url:'https://invalid.example/a.png',format:'png',mediaType:'IMAGE'};
+ expect((await post('/api/photos',input)).status()).toBe(400);
+ expect((await post('/api/photos/batch',{items:[input]})).status()).toBe(400);
+ const uploadId=crypto.randomUUID(),url=`/api/media/uploads/${uploadId}.png`;
+ expect((await post('/api/photos',{...input,url})).status()).toBe(409);
+ const signed=await post('/api/photos/generate-upload-url',{uploadId,contentType:'image/png',size:32});
+ expect(signed.status()).toBe(200);const upload=await signed.json();
+ const fake=await page.request.put(upload.uploadUrl,{headers:{'content-type':'image/png'},data:Buffer.alloc(32,60)});expect(fake.ok()).toBe(true);
+ expect((await post('/api/photos',{...input,url})).status()).toBe(415);
+ expect((await post('/api/photos/batch',{items:[{...input,url}]})).status()).toBe(415);
+ expect((await post('/api/photos/generate-upload-url',{contentType:'image/png'})).status()).toBe(400);
+});
 test('family login/logout and anonymous data/media/Agent rejection',async({page,request})=>{
  expect((await request.get('/api/baby')).status()).toBe(401);
  expect((await request.get('/api/media/uploads/not-a-real-file.png')).status()).toBe(401);

@@ -1,0 +1,15 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import {testTargetGuard} from './test-target-guard.js';
+const {target,version}=testTargetGuard();
+const vars=new Map(version.bindings.filter((b:{type:string})=>b.type==='plain_text').map((b:{name:string;text:string})=>[b.name,b.text]));
+if(vars.get('MYBABY_AGENT_GRANTS')!=='[]'||vars.get('MYBABY_AGENT_WRITES_ENABLED')!=='false')throw new Error('empty_grants_and_writes_disabled_required');
+const query=JSON.parse(readFileSync('.migration/rc/agent-query.json','utf8'));
+const [botId,messageId]=query.batch[0].params;
+const secrets=JSON.parse(readFileSync('.migration/secrets.json','utf8'));
+const response=await fetch(target.origin+'/api/agent/v1',{method:'POST',headers:{authorization:`Bearer ${secrets.MYBABY_AGENT_TOKEN}`,'content-type':'application/json'},body:JSON.stringify({source:'weixin',botId,userId:'cloud-migration-test-user',messageId,operation:'create_growth_record',operationKey:'op_0',args:{date:'2026-10-10',weight:10.6,notes:'synthetic-revocation'}}),signal:AbortSignal.timeout(30000)});
+if(response.status!==403)throw new Error('revoked_replay_not_denied');
+const row=JSON.parse(execFileSync('cf',['d1','query',target.databaseId,'--body','@.migration/rc/agent-query.json'],{encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe']}))[0].results[0];
+if(row.receipts!==1||row.mutations!==1)throw new Error('receipt_not_preserved');
+writeFileSync('.migration/rc/revocation-verification.json',JSON.stringify({observedAt:new Date().toISOString(),status:'passed',revokedReplayStatus:403,receipts:1,grantsEmpty:true,agentWritesEnabled:false}),{mode:0o600});
+console.log('PASS: control-plane grants empty, writes disabled, committed receipt replay 403 and receipt preserved. Prior transport failure remains recorded.');

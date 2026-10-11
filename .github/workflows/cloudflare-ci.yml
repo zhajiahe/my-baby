@@ -1,0 +1,70 @@
+name: Cloudflare release candidate
+on:
+  pull_request:
+  push:
+    branches: [feat/cloudflare-migration]
+  workflow_dispatch:
+    inputs:
+      isolated_e2e:
+        description: 'Deploy candidate ONLY to approved isolated resources and run browser E2E'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: cloudflare-ci-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:unit
+      - run: npm run build
+  isolated-e2e:
+    needs: checks
+    if: github.event_name == 'workflow_dispatch' && inputs.isolated_e2e && github.ref == 'refs/heads/feat/cloudflare-migration'
+    runs-on: ubuntu-latest
+    environment: cloudflare-isolated-e2e
+    concurrency:
+      group: cloudflare-isolated-resources
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_ISOLATED_API_TOKEN }}
+      MYBABY_E2E_CHROMIUM_BUNDLED: 'true'
+      MYBABY_E2E_WEBKIT: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - name: Install protected isolated configuration
+        env:
+          TARGET: ${{ secrets.MYBABY_ISOLATED_TARGET_JSON }}
+          SECRETS: ${{ secrets.MYBABY_ISOLATED_SECRETS_JSON }}
+        run: |
+          umask 077
+          mkdir -p .migration
+          printf '%s' "$TARGET" > .migration/target.json
+          printf '%s' "$SECRETS" > .migration/secrets.json
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run deploy:cloudflare:test -- --without-source-media > .migration/ci-deploy.log 2>&1
+      - run: npm run test:e2e:seed > .migration/ci-seed.log 2>&1
+      - run: npm run test:e2e:fixtures
+      - run: npm run test:e2e
+      # No production job, source DATABASE_URL, migration export or source R2 binding.
+      # Never upload traces/screenshots/secret-bearing logs, even on failure.
+      - name: Remove private runner evidence
+        if: always()
+        run: rm -rf .migration

@@ -1,5 +1,7 @@
 # Cloudflare 迁移验收报告（可审计）
 
+> 本文件保留上一轮证据。最新发布候选推进、失败与门禁见 [CLOUDFLARE_RC_REPORT.md](CLOUDFLARE_RC_REPORT.md)，不能用历史通过代替本轮验收。
+
 状态日期：2026-10-11 · 分支 `feat/cloudflare-migration` · 基线提交 `8a887ab`（本报告对应其上的未提交实现）
 
 **结论：No-Go。** 隔离环境的合成与浏览器验收通过，但真实微信、真实 Safari/真机、MOV/HEVC、WAF/长期凭证、生产资源与生产切换均未验收，也未获批准。

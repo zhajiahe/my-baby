@@ -15,7 +15,7 @@
 
 工厂需要生产 account/D1/code version 元数据及显式 `MYBABY_PRODUCTION_APPROVED=standby-only`；该环境变量只是操作门禁，**不是用户批准的替代品**。默认关闭 workers.dev、冻结业务写入、空 Agent grants、关闭 Agent writes。不包含 SOURCE_MEDIA、MIGRATION_TOKEN、测试 SESSION_TOKEN、微信 DO/Queue。
 
-正式 schema/importer 必须另行评审：保留业务表结构，deployment_guard 必须写为 `mybaby-production`；不得直接执行只允许测试目标的 importer 或沿用测试 guard。
+正式 importer 的独立 `--production` 入口已准备，复用现有转换/只读导出逻辑，生产 schema guard 为 `mybaby-production`。必须先审批并冻结，不能修改测试 target 绕过门禁；尚未在正式资源执行或验收。
 
 ## 2. WAF 与长期凭证：未执行的生产阻塞
 
@@ -53,11 +53,36 @@ npm run rollback:cloudflare:test
 ## 5. 正式切换与切回
 
 1. 明确批准生产资源、长期凭证、套餐/预算和最终迁移窗口。
-2. Freeze 原入口写入；暂停对应桥接消费；等待已签发直传 URL 的 600 秒 TTL 和在途上传完成，必要时吊销旧上传 key。冻结开关不能撤销已签发的 R2 PUT。
+2. 另行获得批准后 Freeze 原入口写入；涉及生产桥接暂停必须单独授权，本轮不暂停或改动现有微信 Worker；等待已签发直传 URL 的 600 秒 TTL 和在途上传完成，必要时经批准吊销旧上传 key。冻结开关不能撤销已签发的 R2 PUT。
 3. 创建可恢复的 Neon、R2、配置/秘密引用备份，并演练恢复到**另一个隔离目标**。备份包含原 ID、JSON、UTC 日期、媒体摘要和 Agent/media receipts。
 4. 最后一次一致性导出 → 独立生产 D1 导入 → 逐字段/关系/媒体完整性复核；审批恢复演练、浏览器/真实微信矩阵后才绑定域名。
 5. 上线后监控只读 canary 和真实低风险写入的事务回执，再按批准顺序开放写入/Agent grants。
 6. 若 CF 已产生新写入，切回前再次冻结：导出 D1/R2 增量及回执，用 original ID/operation key 对账到隔离 PostgreSQL 并验证；审批后才对旧生产应用接收新写入。**不能直接切 DNS 丢掉 CF 新数据**。
 7. 分别验证代码版本、域名路由、长期 secret 版本、schema 兼容性和原/新增数据。变更 schema 或 secret 后不要强制绕过 Cloudflare 的 rollback 检查。
 
-当前生产结论：**No-Go**。模板、单次 probe 和测试版本回滚都不能替代这些验收。
+## 6. 已准备的独立最终迁移/恢复命令（本轮未向生产执行）
+
+准备 `.migration-production/target.json`（0700 目录/0600 文件），字段与测试 target 的导出源元数据相同，但 Worker=`mybaby-web-production`、bucket=`mybaby-production-media`、databaseId 必须是新独立 ID；另加 `approval: {approvedBy, frozenAt, backupReference}`。这些记录和环境开关只是门禁，不替代用户批准。
+
+```sh
+# 仅批准 standby 后，保持 Web 冻结/Agent grants=[]/Agent writes=false。
+export MYBABY_PRODUCTION_MIGRATION_APPROVED=standby-only
+# 必须显式指定只读源连接；不得打印该值。
+# MYBABY_MIGRATION_SOURCE_URL 由秘密管理器提供。
+npm run migration -- export --production
+npm run migration -- schema --production
+npm run migration -- import --production
+npm run migration -- validate --production --require-media
+# 已新增写入时，先冻结并等待签名 TTL/在途写入结束，导出保留双回执的快照：
+npx tsx scripts/cloudflare-rollback-export.ts --production
+```
+
+写目标操作会核对 Cloudflare 实际 D1 名称、单版本部署、DB/R2 bindings、空 grants 与两个写开关。快照须晚于冻结；生产模式拒绝 `--reset-test-data`，拒绝 `media` 的测试复制 route。`--require-media` 需要独立正式目录内由正式对象逐个字节/SHA-256 验证产生的 `media-report.json`，不能复制测试 report 冒充正式目标证据。最终源媒体只读转移工具仍缺，故此链路尚不可完整执行验收。
+
+回滚出口只读取冻结 D1、保留业务和两套 receipt；保留 R2 不删除。**有新写入时不要直接回切 DNS**：需另行实现/演练到隔离 PostgreSQL 的增量合并、删除对账与回执保留，然后明确批准生产反向导入。此工具不是 Neon 逆向恢复工具。
+
+外部调度器可执行 `npx tsx scripts/cloudflare-alert-probe.ts`，需要独立 `MYBABY_MONITOR_ORIGIN`、operations token 和 HTTPS `MYBABY_ALERT_WEBHOOK`（事件接收器，非假定 Slack 格式）。可加 `--simulate-failure` 验证报警。输出仅标量事件；接收器应去重、连续失败阈值和恢复通知。本轮没有告警接收地址，**未验证实际送达**。
+
+GitHub `cloudflare-isolated-e2e` environment 必须设置审批者、仅允许迁移分支、三项隔离 secrets（API token/target JSON/secrets JSON）；token 只给测试资源必需权限，不提供生产秘密。E2E seed 会重置隔离副本，只能在独占窗口运行，禁止与本机验收并行。不得上传 trace/截图/部署日志。CI 尚需真实 runner 执行，不能用本机结果代替。
+
+当前生产结论：**No-Go**。模板、单次 probe 和测试版本回滚都不能替代这些验收；本轮完整结果见 [CLOUDFLARE_RC_REPORT.md](CLOUDFLARE_RC_REPORT.md)。

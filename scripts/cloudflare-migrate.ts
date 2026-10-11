@@ -3,15 +3,23 @@ import {readFileSync,writeFileSync,mkdirSync,chmodSync,existsSync} from 'node:fs
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {PrismaClient} from '@prisma/client';
-const directory='.migration';mkdirSync(directory,{recursive:true,mode:0o700});chmodSync(directory,0o700);
+const production=process.argv.includes('--production');
+const directory=production?'.migration-production':'.migration';mkdirSync(directory,{recursive:true,mode:0o700});chmodSync(directory,0o700);
 const read=(path:string)=>JSON.parse(readFileSync(path,'utf8'));
 const save=(path:string,value:unknown)=>{writeFileSync(path,JSON.stringify(value),{mode:0o600});chmodSync(path,0o600);};
 const tables=['babies','growth_records','milestones','media_items','agent_operations'];
 const target=read(`${directory}/target.json`);
-if(target.workerName!=='mybaby-web-migration-test'||target.bucketName!=='mybaby-cloudflare-migration-test-media'||!target.databaseId)throw new Error('test_target_required');
+const guardName=production?'mybaby-production':'mybaby-cloudflare-migration-test';
+if(production){
+ const test=read('.migration/target.json');
+ if(process.env.MYBABY_PRODUCTION_MIGRATION_APPROVED!=='standby-only'||!target.approval?.approvedBy||!target.approval?.frozenAt||!target.approval?.backupReference)throw new Error('production_freeze_backup_approval_required');
+ if(target.workerName!=='mybaby-web-production'||target.bucketName!=='mybaby-production-media'||!target.databaseId||target.databaseId===test.databaseId||target.bucketName===test.bucketName||target.origin===test.origin)throw new Error('independent_production_target_required');
+ if(process.argv.includes('--reset-test-data'))throw new Error('production_reset_forbidden');
+ if(process.argv[2]==='media')throw new Error('production_media_copy_requires_separate_readonly_source_transfer');
+}else if(target.workerName!=='mybaby-web-migration-test'||target.bucketName!=='mybaby-cloudflare-migration-test-media'||!target.databaseId)throw new Error('test_target_required');
 function query(batch:{sql:string;params?:unknown[]}[]){
  const path=`${directory}/query.json`;save(path,{batch});
- try{return JSON.parse(execFileSync('cf',['d1','query',target.databaseId,'--body',`@${path}`],{encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']}));}
+ try{return JSON.parse(execFileSync('cf',['d1','query',target.databaseId,'--body',`@${path}`],{encoding:'utf8',timeout:120000,maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']}));}
  catch{throw new Error('isolated_d1_query_failed_private_inputs_not_logged');}
 }
 const sha=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -22,7 +30,9 @@ async function main(){
  const command=process.argv[2];
  if(command==='export'){
   const url=process.env.MYBABY_MIGRATION_SOURCE_URL||sourceEnv().DATABASE_URL;
-  if(!url)throw new Error('source_url_required');const client=new PrismaClient({datasourceUrl:url});
+  if(!url)throw new Error('source_url_required');
+  if(production&&!process.env.MYBABY_MIGRATION_SOURCE_URL)throw new Error('explicit_readonly_source_required');
+  const client=new PrismaClient({datasourceUrl:url});
   try{
    const rows=await client.$transaction(async tx=>{
     await tx.$executeRawUnsafe('SET TRANSACTION READ ONLY');
@@ -37,17 +47,25 @@ async function main(){
  }
  if(!['schema','import','validate','media'].includes(command))throw new Error('usage_export_schema_import_validate_media');
  const databaseMetadata=JSON.parse(execFileSync('cf',['d1','get',target.databaseId],{encoding:'utf8',stdio:['ignore','pipe','pipe']}));
- if(databaseMetadata.name!=='mybaby-cloudflare-migration-test')throw new Error('unexpected_d1_name');
+ if(databaseMetadata.name!==guardName)throw new Error('unexpected_d1_name');
+ if(production){
+  const deployments=JSON.parse(execFileSync('cf',['workers','deployments','list','--worker',target.workerName],{encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe']})).deployments;
+  if(deployments[0]?.versions?.length!==1||deployments[0].versions[0].percentage!==100)throw new Error('single_frozen_production_version_required');
+  const deployed=JSON.parse(execFileSync('cf',['workers','versions','get',deployments[0].versions[0].version_id,'--worker-id',target.workerName],{encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe']}));
+  const b=deployed.bindings as {name:string;type:string;text?:string;database_id?:string;bucket_name?:string}[];
+  if(b.find(x=>x.name==='DB')?.database_id!==target.databaseId||b.find(x=>x.name==='MEDIA')?.bucket_name!==target.bucketName||b.some(x=>x.name==='SOURCE_MEDIA')||b.find(x=>x.name==='MYBABY_WRITES_FROZEN')?.text!=='true'||b.find(x=>x.name==='MYBABY_AGENT_GRANTS')?.text!=='[]'||b.find(x=>x.name==='MYBABY_AGENT_WRITES_ENABLED')?.text!=='false')throw new Error('actual_independent_frozen_production_bindings_required');
+ }
  if(command==='schema'){
   // UUID/name match is checked before even applying the test schema.
   const identity=query([{sql:'SELECT name FROM sqlite_master WHERE type=\'table\' AND name=\'deployment_guard\''}]);
   if(identity[0].results.length){const existing=query([{sql:"SELECT value FROM deployment_guard WHERE name='environment'"}]);
-   if(existing[0].results[0]?.value!=='mybaby-cloudflare-migration-test')throw new Error('test_guard_required');}
-  query([{sql:readFileSync('cloudflare/migrations/0001_initial.sql','utf8')},{sql:readFileSync('cloudflare/migrations/0002_media_upload_receipts.sql','utf8')}]);console.log('Isolated D1 schema ready.');return;
+   if(existing[0].results[0]?.value!==guardName)throw new Error('test_guard_required');}
+  query([{sql:readFileSync('cloudflare/migrations/0001_initial.sql','utf8').replace("'mybaby-cloudflare-migration-test'",`'${guardName}'`)},{sql:readFileSync('cloudflare/migrations/0002_media_upload_receipts.sql','utf8')}]);console.log('Guarded target D1 schema ready.');return;
  }
  const guard=query([{sql:"SELECT value FROM deployment_guard WHERE name='environment'"}]);
- if(guard[0].results[0]?.value!=='mybaby-cloudflare-migration-test')throw new Error('test_guard_required');
+ if(guard[0].results[0]?.value!==guardName)throw new Error('test_guard_required');
  const snapshot=read(`${directory}/source.json`);if(snapshot.version!==1)throw new Error('snapshot_version');
+ if(production&&(!Number.isFinite(Date.parse(target.approval.frozenAt))||!Number.isFinite(Date.parse(snapshot.exportedAt))||Date.parse(snapshot.exportedAt)<Date.parse(target.approval.frozenAt)||Date.parse(target.approval.frozenAt)>Date.now()))throw new Error('final_snapshot_after_freeze_required');
  const objects=new Set<string>();const domain=new URL(target.sourcePublicDomain);
  function mediaURL(url:string|null){if(!url)return url;const parsed=new URL(url);
   if(parsed.origin!==domain.origin)throw new Error('unapproved_media_origin');
@@ -92,7 +110,7 @@ async function main(){
    return {sql:`INSERT INTO ${table} (${keys.map(k=>`"${k}"`).join(',')}) VALUES (${keys.map(()=>'?').join(',')}) ON CONFLICT(id) DO UPDATE SET ${keys.filter(k=>k!=='id').map(k=>`"${k}"=excluded."${k}"`).join(',')}`,
     params:keys.map(k=>row[k])};});
    for(let i=0;i<statements.length;i+=50)query(statements.slice(i,i+50));}
-  console.log('Snapshot imported only into guarded test D1.');
+  console.log('Snapshot imported only into independently guarded target D1.');
  }
  const report:Record<string,unknown>={};
  for(const table of tables){const actual=query([{sql:`SELECT * FROM ${table}`}])[0].results;

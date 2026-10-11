@@ -4,7 +4,7 @@ import {randomBytes} from 'node:crypto';import {codeVersion} from './code-versio
 const dir='.migration',target=JSON.parse(readFileSync(`${dir}/target.json`,'utf8'));
 if(target.workerName!=='mybaby-web-migration-test'||target.bucketName!=='mybaby-cloudflare-migration-test-media'||!target.sourceBucket||target.sourceBucket===target.bucketName)throw new Error('isolated_target_required');
 function run(command:string,args:string[],env:NodeJS.ProcessEnv=process.env){
- try{return execFileSync(command,args,{env,encoding:'utf8',maxBuffer:32*1024*1024,stdio:['ignore','pipe','pipe']});}
+ try{return execFileSync(command,args,{env,encoding:'utf8',timeout:180000,maxBuffer:32*1024*1024,stdio:['ignore','pipe','pipe']});}
  catch(error){const e=error as {stdout?:string;stderr?:string};
   writeFileSync(`${dir}/deploy-failure.log`,String(e.stdout||'')+String(e.stderr||''),{mode:0o600});
   throw new Error('test_deploy_failed_private_values_not_logged');}}

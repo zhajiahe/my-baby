@@ -103,6 +103,8 @@ export async function ilinkRequest(base: string, path: string, options: {
   } finally { joined.dispose(); clearTimeout(timer); }
 }
 
+import { classifyMediaItems, mediaRejectionReason } from './media.js';
+
 const baseInfo = () => ({ channel_version: CHANNEL_VERSION, bot_agent: 'MyBaby/0.1.0' });
 
 export interface Updates {
@@ -160,9 +162,40 @@ export function incomingTextRejection(value: unknown, botId: string, allowed: st
   if (!(typeof id === 'number' && Number.isSafeInteger(id) && id >= 0)
     && !(typeof id === 'string' && /^\d{1,30}$/.test(id))) return 'invalid_message_id';
   const text = textItems(m.item_list);
-  if (!text) return 'non_text_message';
+  if (!text) {
+    // Non-text messages keep distinct reasons so reception counters can show
+    // whether images or voices actually arrive, instead of one opaque bucket.
+    const classified = classifyMediaItems(m.item_list);
+    return 'media' in classified ? mediaRejectionReason(classified.media) : classified.reason;
+  }
   if (text.length > 8_000 || m.context_token.length > 8_000) return 'message_too_large';
   return null;
+}
+
+interface MessageEnvelope {
+  message_id: string | number; from_user_id: string; context_token: string; item_list: unknown[]; create_time_ms?: number;
+}
+
+function receivedAtOf(m: MessageEnvelope): number {
+  return typeof m.create_time_ms === 'number' && Number.isSafeInteger(m.create_time_ms)
+    && m.create_time_ms > 0 && m.create_time_ms <= Date.now() + 60_000 ? m.create_time_ms : Date.now();
+}
+
+export interface IncomingMedia {
+  kind: 'image' | 'voice'; type: number; item: Record<string, unknown>;
+  messageId: string; userId: string; contextToken: string; receivedAt: number;
+}
+
+// Media messages pass the exact same envelope, sender and context checks as text.
+// Only the item payload differs, and that payload is treated as unverified.
+export function incomingMedia(value: unknown, botId: string, allowed: string[]): IncomingMedia | null {
+  const reason = incomingTextRejection(value, botId, allowed);
+  if (reason !== 'voice_message' && reason !== 'image_message') return null;
+  const m = value as MessageEnvelope;
+  const classified = classifyMediaItems(m.item_list);
+  if (!('media' in classified)) return null;
+  return { ...classified.media, messageId: String(m.message_id), userId: m.from_user_id,
+    contextToken: m.context_token, receivedAt: receivedAtOf(m) };
 }
 
 function textItems(items: unknown[]): string {
@@ -174,11 +207,10 @@ function textItems(items: unknown[]): string {
 
 export function incomingText(value: unknown, botId: string, allowed: string[]): IncomingText | null {
   if (incomingTextRejection(value, botId, allowed)) return null;
-  const m = value as { message_id: string | number; from_user_id: string; context_token: string; item_list: unknown[]; create_time_ms?: number };
+  const m = value as MessageEnvelope & { item_list: unknown[] };
   const id = m.message_id;
   const text = textItems(m.item_list);
-  const receivedAt = typeof m.create_time_ms === 'number' && Number.isSafeInteger(m.create_time_ms)
-    && m.create_time_ms > 0 && m.create_time_ms <= Date.now() + 60_000 ? m.create_time_ms : Date.now();
+  const receivedAt = receivedAtOf(m);
   return { messageId: String(id), userId: m.from_user_id, text, contextToken: m.context_token, receivedAt };
 }
 

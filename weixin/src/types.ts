@@ -13,6 +13,9 @@ export interface Env {
   MYBABY_AGENT_TOKEN?: string;
   AGENT_WRITES_ENABLED?: string;
   AGENT_TIME_ZONE?: string;
+  // Voice understanding is off unless a deploy explicitly enables it.
+  OPENROUTER_ASR_MODEL?: string;
+  MEDIA_INGEST_ENABLED?: string;
   // Only the separately named synthetic acceptance Worker supplies this.
   DEPLOYMENT_KIND?: 'synthetic-acceptance';
   ILINK_ACCEPTANCE?: DurableObjectNamespace;

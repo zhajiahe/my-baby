@@ -155,7 +155,7 @@ export class WeixinSession {
     // Bumped whenever observable bridge behaviour changes so a status read can
     // prove which build the live Durable Object actually runs. 0.1.4 added the
     // per-type reception reasons; 0.1.5 added the media probe; 0.1.6 consumes voice
-    return json({ adapterVersion: '0.1.9', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
+    return json({ adapterVersion: '0.1.10', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
       lastPollAt: c?.lastPollAt ?? null, lastError: c?.lastError ?? null,
       failures: c?.failures ?? 0, cursorSaved: Boolean(c?.cursor),
       nextAlarmAt: await this.ctx.storage.getAlarm(), events: counts,

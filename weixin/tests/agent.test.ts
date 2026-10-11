@@ -133,7 +133,11 @@ test('planner prompt pins unit conversion and confirmation rules', async t => {
     assert.ok(system.includes('1 斤 = 0.5 kg'), 'jin to kg conversion must be stated explicitly');
     assert.ok(system.includes('不要猜'), 'missing units must be clarified, never guessed');
     assert.ok(system.includes('20kg'), 'implausible measurements must be confirmed first');
-    assert.ok(system.includes('list_growth_records'), 'same-day duplicates must be checked before writing');
+    // A stated measurement must always result in a write. The earlier duplicate-check
+    // wording let the model emit a lone query, so a real voice message recorded nothing.
+    assert.ok(system.includes('必须规划 create_growth_record'), 'a stated measurement must be planned as a write');
+    assert.ok(system.includes('绝不要只查询而不新增'), 'a query-only plan must be ruled out');
+    assert.ok(system.includes('list_growth_records'), 'the optional same-day check stays available in the same plan');
     return Response.json(modelResponse());
   });
   await planMessage({ ...input, baby, writesEnabled: true }, config);

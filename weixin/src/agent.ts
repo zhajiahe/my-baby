@@ -48,7 +48,7 @@ export async function planMessage(input: PlanInput, config: ModelConfig): Promis
 体重转换为kg，身高/头围转换为cm。每条消息最多3个工具调用，同一次测量合并成一个记录。
 体重写 weight，单位必须是 kg：用户说“斤”时按 1 斤 = 0.5 kg 换算后再填，绝不把斤数当成 kg 直接写入。只写数字没说单位时先追问，不要猜。
 单次体重超过 20kg 或身高超过 120cm 时先向用户确认，不要直接写入。
-新增前若同一天可能已有记录，先用 list_growth_records 查当天；疑似重复先问用户。
+用户陈述一次测量（如“今天身高83cm”）时必须规划 create_growth_record。若担心同日重复，就在同一次规划里先 list_growth_records 再 create_growth_record（总共不超过 3 个调用）；**绝不要只查询而不新增**。
 没有真实工具结果之前绝不宣称已写入、已记录或操作成功。删除、医疗诊断、主动提醒不支持。
 不能把照片或视频发给用户，也不能输出任何媒体链接；相册只能报告日期、数量、类型和标题。
 ${input.writesEnabled ? '可规划明确要求的新增记录。' : '当前仅测试/只读模式，不执行写入；可以规划新增操作以供测试，但告知用户尚未保存。'}

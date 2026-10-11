@@ -7,12 +7,49 @@ export function normalizeMediaFile(file:File):File{
  const types:Record<string,string>={heic:'image/heic',heif:'image/heif',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp',avif:'image/avif',mp4:'video/mp4',m4v:'video/mp4',webm:'video/webm',mov:'video/quicktime'};
  return ext&&types[ext]?new File([file],file.name,{type:types[ext]}):file;
 }
-export async function browserImage(file:File):Promise<File>{
- if(/\.(heic|heif)$/i.test(file.name)||file.type.includes('heic')||file.type.includes('heif')){
-  const {default:convert}=await import('heic2any');
-  const result=await convert({blob:file,toType:'image/jpeg',quality:0.85});
-  return new File([Array.isArray(result)?result[0]:result],file.name.replace(/\.[^.]+$/,'.jpg'),{type:'image/jpeg'});
+export const isHeic=(file:{name:string;type:string})=>/\.(heic|heif)$/i.test(file.name)||/hei[cf]/i.test(file.type);
+// The original is archived untouched. A preview is derived only when the browser can
+// decode the container itself: Safari decodes HEIC natively, so an iPhone upload gets a
+// small JPEG preview without ever running a full-resolution WASM conversion. Outside
+// Safari (Chrome cannot decode HEIC) no preview is produced and the original is still
+// stored, which is why the album card falls back to its placeholder there.
+const MAX_PREVIEW_EDGE=1600;
+export async function heicPreview(file:Blob,signal?:AbortSignal):Promise<Blob|null>{
+ try{
+  if(signal?.aborted)throw new DOMException('图片处理已取消','AbortError');
+  const bitmap=await createImageBitmap(file);
+  try{
+   const scale=Math.min(1,MAX_PREVIEW_EDGE/Math.max(bitmap.width,bitmap.height));
+   const canvas=document.createElement('canvas');
+   canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+   const ctx=canvas.getContext('2d');if(!ctx)return null;
+   ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
+   return await new Promise<Blob|null>(resolve=>canvas.toBlob(blob=>resolve(blob),'image/jpeg',0.8));
+  }finally{bitmap.close();}
+ }catch(error){
+  if(error instanceof DOMException&&error.name==='AbortError')throw error;
+  return null;
  }
+}
+export interface ImagePrep {original:File;preview:Blob|null}
+export async function prepareImage(file:File,signal?:AbortSignal):Promise<ImagePrep>{
+ if(isHeic(file))return {original:file,preview:await heicPreview(file,signal)};
+ return {original:await browserImage(file),preview:null};
+}
+export interface VideoPrep {original:File;transcoded:boolean}
+// iPhone MOV/HEVC is uploaded as the original. Nothing is re-encoded before the file is
+// safely in R2, so a slow or interrupted network never costs a finished conversion, and
+// Safari plays the archived HEVC natively. Browsers without an HEVC decoder show an
+// explicit unsupported notice instead of being handed a second, slow conversion.
+export async function prepareVideo(file:File,options:VideoOptions={}):Promise<VideoPrep>{
+ if(options.signal?.aborted)throw new DOMException('视频处理已取消','AbortError');
+ return {original:file,transcoded:false};
+}
+export function canPlayVideoType(type:string):boolean{
+ if(typeof document==='undefined')return true;
+ try{return !!document.createElement('video').canPlayType(type);}catch{return false;}
+}
+export async function browserImage(file:File):Promise<File>{
  if(['image/jpeg','image/png','image/gif','image/webp'].includes(file.type))return file;
  const bitmap=await createImageBitmap(file),canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;
  const ctx=canvas.getContext('2d');if(!ctx){bitmap.close();throw new Error('图片转换不可用');}

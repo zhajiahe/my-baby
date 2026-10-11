@@ -1,9 +1,12 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import Image from 'next/image'
-import { browserVideo, browserImage, normalizeMediaFile } from '@/lib/media-client'
+import { prepareImage, prepareVideo, normalizeMediaFile, canPlayVideoType, type ImagePrep, type VideoPrep } from '@/lib/media-client'
+import PrivateVideo from './PrivateVideo'
 import { videoMetadata, mediaFetch } from '@/lib/media-metadata'
+import { createUploadTrace, stageLabels, type UploadStage } from '@/lib/upload-timing'
+import { uploadInParts } from '@/lib/multipart-upload'
+import { PART_BYTES } from '@/lib/media-multipart'
 import { Calendar, Clock, Upload, X, Trash2, Image as ImageIcon, Film } from 'lucide-react'
 import { useBaby } from '@/hooks/useBaby'
 import { useToastContext } from '@/components/providers/ToastProvider'
@@ -64,6 +67,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     title: string;
     status: 'pending' | 'uploading' | 'success' | 'error';
     progress: number;
+    stage?: UploadStage;
     errorMessage?: string;
     uploadedUrl?: string;
     uploadedResult?: {url:string;mediaType:'IMAGE'|'VIDEO';format:string;thumbnailUrl:string|null;duration:number|null};
@@ -325,18 +329,18 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     return ext ? `${safeName}.${ext}` : safeName;
   };
 
-  // 辅助函数：HEIC/HEIF 转换为 JPEG（使用 heic2any 库，动态导入）
-  const convertHeicToJpeg = async (file: File): Promise<{ blob: Blob; type: string }> => {
-    const converted = await browserImage(file);
-    return { blob: converted, type: converted.type };
-  };
+  // Map the stored container back to the type the capability probe expects.
+  const videoMime = (format?: string): string => (({mov:'video/quicktime',mp4:'video/mp4',webm:'video/webm'} as Record<string,string>)[format || ''] || 'video/mp4');
 
   // 辅助函数：处理视频元数据（缩略图 + 时长，只加载一次视频）
+  // A cover is best effort: the original is already stored, so a device that cannot
+  // decode the container must not fail the whole upload.
   const processVideoMetadata = async (file: File,signal:AbortSignal): Promise<{
     thumbnail: Blob | null;
     duration: number | null;
   }> => {
-    return videoMetadata(file,15000,signal);
+    try{return await videoMetadata(file,15000,signal);}
+    catch{return {thumbnail:null,duration:null};}
   };
 
   // 辅助函数：直接上传到 R2（绕过服务器，解决文件大小限制）
@@ -344,7 +348,9 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     file: File,
     uploadId: string,
     signal: AbortSignal,
-    onProgress: (progress: number) => void
+    onProgress: (progress: number) => void,
+    onStage: (stage: UploadStage) => void,
+    trace: ReturnType<typeof createUploadTrace>
   ): Promise<{
     url: string;
     mediaType: 'IMAGE' | 'VIDEO';
@@ -353,84 +359,83 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
     duration: number | null;
   }> => {
     const isVideo = file.type.startsWith('video/');
-    
-    // 处理文件（HEIC 转换等）
-    const blob = isVideo ? await browserVideo(file,{signal,onProgress}) : (await convertHeicToJpeg(file)).blob;
+    const report=(from:number,to:number,fraction:number)=>onProgress(from+Math.round(Math.max(0,Math.min(1,fraction))*(to-from)));
+
+    // Stage 1: keep the original bytes. Nothing is re-encoded before the file is stored,
+    // so a slow or interrupted radio never costs a finished conversion.
+    onStage(isVideo?'video_preprocessing':'photo_processing');
+    const prepared = await trace.stage<ImagePrep|VideoPrep>(isVideo?'video_preprocessing':'photo_processing',
+      ()=>isVideo?prepareVideo(file,{signal}):prepareImage(file,signal));
+    const blob = prepared.original;
+    const preview = 'preview' in prepared ? prepared.preview : null;
     if(signal.aborted)throw new Error('上传已取消，可重试');
-    if(blob.size>100*1024*1024)throw new Error('转换后文件超过 100MB，请选择较短的视频');
-    const processedType = blob.type;
-    const processedFile = new File([blob], file.name, { type: processedType });
-    
-    const metadata = isVideo ? await processVideoMetadata(processedFile,signal) : null;
-    onProgress(10);
-    
-    // 步骤1: 获取预签名 URL
-    const urlResponse = await mediaFetch('/api/photos/generate-upload-url', {
-      signal,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uploadId,
-        filename: sanitizeFileName(file.name),
-        contentType: processedType,
-        size: blob.size,
-        isVideo,
-      }),
+    if(blob.size>100*1024*1024)throw new Error('原片超过 100MB，请选择较短的视频');
+    report(0,10,1);
+
+    // Stage 2: presign. The object key is always derived server-side from the upload id.
+    onStage('presign');
+    const urlData = await trace.stage('presign',async()=>{
+      const urlResponse = await mediaFetch('/api/photos/generate-upload-url', {
+        signal,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uploadId,
+          filename: sanitizeFileName(file.name),
+          contentType: blob.type || file.type,
+          size: blob.size,
+          isVideo,
+        }),
+      });
+      if (!urlResponse.ok) {
+        const errorData = await urlResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || '获取上传链接失败');
+      }
+      return await urlResponse.json();
     });
-    
-    if (!urlResponse.ok) {
-      const errorData = await urlResponse.json().catch(() => ({}));
-      throw new Error(errorData.error || '获取上传链接失败');
-    }
-    
-    const urlData = await urlResponse.json();
-    onProgress(20);
-    
-    // 步骤2: 直接上传到 R2
-    const uploadResponse = await mediaFetch(urlData.uploadUrl, {
-      signal,
-      method: 'PUT',
-      headers: {
-        'Content-Type': urlData.contentType,
-      },
-      body: blob,
-    });
-    
-    if (!uploadResponse.ok) {
-      throw new Error(`上传失败 (HTTP ${uploadResponse.status})`);
-    }
-    
-    onProgress(70);
-    
-    // 视频缩略图和时长处理
+    report(10,15,1);
+
+    // Stage 3: transfer. Video and anything larger than one part uses multipart, which is
+    // the only path that can report byte progress, retry a single part and resume.
+    onStage('r2_put');
+    await trace.stage('r2_put',async()=>{
+      if(isVideo||blob.size>=PART_BYTES){
+        await uploadInParts(blob,{uploadId,signal,onProgress:fraction=>report(15,80,fraction)});
+        return;
+      }
+      const uploadResponse = await mediaFetch(urlData.uploadUrl, {
+        signal,
+        method: 'PUT',
+        headers: { 'Content-Type': urlData.contentType },
+        body: blob,
+      });
+      if (!uploadResponse.ok) throw new Error(`上传失败 (HTTP ${uploadResponse.status})`);
+      report(15,80,1);
+    },{bytes:blob.size});
+
+    // Stage 4: cover. HEIC reuses the Safari-decoded preview; a video captures one frame.
+    // A missing cover never fails an upload that has already stored its original.
+    onStage('thumbnail');
     let thumbnailUrl: string | null = null;
     let duration: number | null = null;
-    
-    if (isVideo) {
-      // 同时获取视频缩略图和时长（只加载一次视频）
-      const { thumbnail: thumbnailBlob, duration: videoDuration } = metadata!;
-      duration = videoDuration;
-      
-      // 上传缩略图
-      if (thumbnailBlob && urlData.thumbnailUploadUrl) {
-        try {
-          const thumbResponse = await mediaFetch(urlData.thumbnailUploadUrl, {
-            signal,
-            method: 'PUT',
-            headers: { 'Content-Type': 'image/jpeg' },
-            body: thumbnailBlob,
-          });
-          if (!thumbResponse.ok) throw new Error('视频缩略图上传失败，请重试');
-          thumbnailUrl = urlData.thumbnailPublicUrl;
-        } catch {
-          throw new Error('视频缩略图上传失败，请重试');
-        }
-      }
-      onProgress(90);
-    } else {
-      onProgress(90);
+    const thumbnailBlob = preview ?? (isVideo ? (await trace.stage('thumbnail',async()=>{
+      const metadata = await processVideoMetadata(blob,signal);
+      duration = metadata.duration;
+      return metadata.thumbnail;
+    })) : null);
+    if(thumbnailBlob && urlData.thumbnailUploadUrl){
+      await trace.stage('thumbnail',async()=>{
+        const thumbResponse = await mediaFetch(urlData.thumbnailUploadUrl, {
+          signal,
+          method: 'PUT',
+          headers: { 'Content-Type': 'image/jpeg' },
+          body: thumbnailBlob,
+        });
+        if (thumbResponse.ok) thumbnailUrl = urlData.thumbnailPublicUrl;
+      });
     }
-    
+    report(80,92,1);
+
     return {
       url: urlData.publicUrl,
       mediaType: urlData.mediaType,
@@ -467,13 +472,16 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
         f.id === item.id ? { ...f, status: 'uploading' as const, progress: 0 } : f
       ));
 
+      const trace = createUploadTrace();
       try {
         // 直接上传到 R2（绕过服务器）
         const uploadResult = item.uploadedResult ?? await uploadDirectToR2(item.file, item.id, controller.signal, (progress) => {
-          setUploadFiles(prev => prev.map(f => 
+          setUploadFiles(prev => prev.map(f =>
             f.id === item.id ? { ...f, progress } : f
           ));
-        });
+        }, (stage) => {
+          setUploadFiles(prev => prev.map(f => f.id === item.id ? { ...f, stage } : f));
+        }, trace);
 
         // 更新进度到 85%
         setUploadFiles(prev => prev.map(f => 
@@ -493,12 +501,12 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
           duration: uploadResult.duration || null,
         };
 
-        const saveResponse = await mediaFetch('/api/photos', {
+        const saveResponse = await trace.stage('d1_save',()=>mediaFetch('/api/photos', {
           signal:controller.signal,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(mediaDataForDb),
-        });
+        }));
 
         // 先读取响应文本
         const saveResponseText = await saveResponse.text();
@@ -526,6 +534,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
           console.error('media_save_invalid_response');
           throw new Error('保存响应格式错误');
         }
+        trace.log('ok');
         successfulItems.push({
           ...savedItem,
           age: calculateAge(savedItem.date),
@@ -803,7 +812,7 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
                                 />
                               </div>
                               <p className="text-xs text-teal-600 mt-1">
-                                {item.progress < 10 ? '准备/转换视频...' : item.progress < 70 ? '上传中...' : item.progress < 90 ? '处理中...' : '即将完成...'} {item.progress}%
+                                {item.stage ? stageLabels[item.stage] : '上传中'} {item.progress}%
                               </p>
                             </div>
                           )}
@@ -965,12 +974,13 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
                 style={getContainerStyle()}
               >
                 {selectedMediaItem.mediaType === 'IMAGE' ? (
-                  <Image
+                  /* Private /api/media paths must be loaded by the browser with the family
+                     cookie. next/image routes them through the optimizer, which rejects
+                     them with 400, so every card fell back to its placeholder. */
+                  <img
                     src={selectedMediaItem.url}
                     alt={selectedMediaItem.title}
                     className="w-full h-full object-contain"
-                    width={imageDimensions?.width || 800}
-                    height={imageDimensions?.height || 600}
                     onLoad={handleImageLoad}
                     onError={(e) => {
                       console.error('Modal image failed to load:', selectedMediaItem.url);
@@ -981,15 +991,16 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
                     }}
                   />
                 ) : selectedMediaItem.mediaType === 'VIDEO' ? (
-                  <video
-                    src={selectedMediaItem.url}
-                    poster={selectedMediaItem.thumbnailUrl}
-                    controls
-                    className="w-full h-full object-contain"
-                    style={{ maxHeight: '70vh' }}
-                  >
-                    Your browser does not support the video tag.
-                  </video>
+                  canPlayVideoType(videoMime(selectedMediaItem.format)) ? (
+                  <PrivateVideo key={selectedMediaItem.id} src={selectedMediaItem.url} poster={selectedMediaItem.thumbnailUrl}
+                    onDimensions={(width,height)=>setImageDimensions({width,height,aspectRatio:width/height})}
+                  />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-3 p-6 text-center">
+                      <p className="text-sm text-gray-600">此浏览器不支持播放该视频格式（HEVC）。请在 iPhone/Safari 打开，或下载原片。</p>
+                      <a href={selectedMediaItem.url} download className="text-sm text-blue-600 underline">下载原片</a>
+                    </div>
+                  )
                 ) : (
                   <div className="text-center">
                     <div className="text-6xl mb-2">❓</div>
@@ -1089,12 +1100,10 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
                 >
                   <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden shadow-md group-hover:shadow-lg transition-shadow relative">
                     {item.mediaType === 'IMAGE' ? (
-                      <Image
+                      <img
                         src={item.url}
                         alt={item.title}
                         className="w-full h-full object-cover"
-                        width={500}
-                        height={500}
                         onError={(e) => {
                           console.error('image_load_failed');
                           // Show a placeholder or error state
@@ -1106,15 +1115,16 @@ export default function PhotoGallery() { // Consider renaming to MediaGallery la
                       />
                     ) : item.mediaType === 'VIDEO' ? (
                       <>
-                        <Image
-                          src={item.thumbnailUrl || '/placeholder-video-thumb.svg'} // Fallback thumbnail
+                        <img
+                          src={item.thumbnailUrl || '/placeholder-video-thumb.svg'}
                           alt={item.title + " thumbnail"}
                           className="w-full h-full object-cover"
-                          width={500}
-                          height={500}
                           onError={(e) => {
+                            // Fall back to the visible placeholder. Hiding the element
+                            // left a blank cover with only a console error, which is the
+                            // hardest failure to notice.
                             console.error('video_thumbnail_load_failed');
-                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.src = '/placeholder-video-thumb.svg';
                           }}
                         />
                         <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-20 group-hover:bg-opacity-10 transition-opacity">

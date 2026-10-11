@@ -6,6 +6,7 @@ import { AgentError } from './agent.js';
 import { failureReply, formatResults } from './tools.js';
 import { classifyMediaItems, markTranscript, voiceTranscript } from './media.js';
 import { recordStructure, type StructureSample } from './probe.js';
+import { imageURL, probeImage, type ImageProbe } from './image-probe.js';
 
 const VOICE_UNUSABLE_REPLY = '收到你的语音了，但里面没有可用的文字，请把内容打成文字发我。';
 
@@ -143,8 +144,8 @@ export class WeixinSession {
       'SELECT state, COUNT(*) AS count FROM events GROUP BY state')).map(row => [row.state, row.count]));
     // Bumped whenever observable bridge behaviour changes so a status read can
     // prove which build the live Durable Object actually runs. 0.1.4 added the
-    // per-type reception reasons; 0.1.5 added the media probe; 0.1.6 consumes voice transcripts.
-    return json({ adapterVersion: '0.1.6', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
+    // per-type reception reasons; 0.1.5 added the media probe; 0.1.6 consumes voice
+    return json({ adapterVersion: '0.1.7', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
       lastPollAt: c?.lastPollAt ?? null, lastError: c?.lastError ?? null,
       failures: c?.failures ?? 0, cursorSaved: Boolean(c?.cursor),
       nextAlarmAt: await this.ctx.storage.getAlarm(), events: counts,
@@ -195,7 +196,7 @@ export class WeixinSession {
       const result = await getUpdates(c.apiBaseUrl, this.env.WEIXIN_BOT_TOKEN,
         c.cursor, c.pollTimeoutMs, controller.signal, this.testTransport());
       const messages: Array<{ id: string; messageId: string; userId: string; text: string; contextToken: string; receivedAt: number; kind: 'text' | 'voice' | 'notice' }> = [];
-      const reception = this.ctx.storage.kv.get<{ received: number; accepted: number; rejected: Record<string, number>; structure?: StructureSample[] }>('reception')
+      const reception = this.ctx.storage.kv.get<{ received: number; accepted: number; rejected: Record<string, number>; structure?: StructureSample[]; image_probe?: ImageProbe }>('reception')
         ?? { received: 0, accepted: 0, rejected: {} };
       for (const raw of result.msgs) {
         reception.received++;
@@ -213,7 +214,15 @@ export class WeixinSession {
           // explicitly enabled. Values are never read or stored.
           if (this.env.MEDIA_PROBE_ENABLED === 'true' && (reason === 'voice_message' || reason === 'image_message')) {
             const classified = classifyMediaItems((raw as { item_list?: unknown[] } | null)?.item_list ?? []);
-            if ('media' in classified) reception.structure = recordStructure(reception.structure, classified.media.kind, classified.media.item);
+            if ('media' in classified) {
+              reception.structure = recordStructure(reception.structure, classified.media.kind, classified.media.item);
+              // Exactly one bounded fetch decides whether an image needs AES
+              // decryption. A failure is recorded, never thrown into polling.
+              if (classified.media.kind === 'image' && reception.image_probe === undefined) {
+                const url = imageURL(classified.media.item);
+                reception.image_probe = url ? await probeImage(url, this.testTransport()) : { error: 'image_url_unavailable' };
+              }
+            }
           }
           // An otherwise authorized text with an unusable ID must not be
           // acknowledged by advancing the cursor: retain it for recovery.

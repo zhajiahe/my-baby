@@ -52,6 +52,6 @@
 
 ## Go/No-Go 门禁
 
-**No-Go。** 剩余硬门禁：真实 Safari/iPhone；真实微信的 24h 复核/凭证轮换/热升级与阶段 B 真实通道业务写入（真实通道**编号文本 10 条**已于 2026-10-11 通过，见 `docs/WEIXIN_CLAWBOT_VALIDATION.md` 第 10 节）；HEVC/MOV、音轨/旋转矩阵或明确批准降级；长期最小权限 R2 凭证与 WAF/分布式认证防护；已签发 PUT 在 TTL 内可再次写同一 key 的不可变发布策略；生产媒体最终只读转移和 hash 校验；生产独立资源/恢复演练/增量逆向迁移；持续监控告警实测；GitHub runner CI 实测及切换批准。
+**No-Go。** 剩余硬门禁：真实 Safari/iPhone；真实微信的 24h 复核/凭证轮换/热升级与阶段 B 真实通道业务写入（真实通道**编号文本 10 条**已于 2026-10-11 通过，见 `docs/WEIXIN_CLAWBOT_VALIDATION.md` 第 10 节）；HEVC/MOV、音轨/旋转矩阵或明确批准降级；长期最小权限 R2 凭证（WAF/分布式认证防护已按极简模式接受不做）；已签发 PUT 在 TTL 内可再次写同一 key 的不可变发布策略；生产媒体最终只读转移和 hash 校验；生产独立资源/恢复演练/增量逆向迁移；持续监控告警实测；GitHub runner CI 实测及切换批准。
 
 最终隔离环境保留源快照数据、239 个 legacy 媒体引用；本轮上传的年轻 uploads 对象由 24h 宽限保护，后续需在维护冻结期间重复清理。Agent grants 空、Agent writes 关闭，Web 写入冻结。没有切换生产流量。

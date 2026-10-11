@@ -254,7 +254,7 @@ Vercel 是 Next.js 官方托管平台，提供最佳部署体验：
 
 1. 将代码推送到 GitHub
 2. 在 [Vercel](https://vercel.com) 中导入项目
-3. 配置环境变量，包括 `MYBABY_APP_PASSWORD` 和 `MYBABY_SESSION_SECRET`；强密码和会话 Secret 不使用 `NEXT_PUBLIC_` 前缀。未配置时站点拒绝访问。
+3. 配置环境变量，包括 `MYBABY_APP_PASSWORD` 和 `MYBABY_SESSION_SECRET`；密码至少 6 位、会话 Secret 至少 32 位，且不使用 `NEXT_PUBLIC_` 前缀。未配置或长度不足时站点拒绝访问。
 4. 审查 [家庭登录与 Agent API 上线门槛](./docs/AGENT_V1.md)，再允许自动部署；Agent 写入默认关闭。
 5. 自动部署完成
 

@@ -17,12 +17,12 @@
 
 正式 importer 的独立 `--production` 入口已准备，复用现有转换/只读导出逻辑，生产 schema guard 为 `mybaby-production`。必须先审批并冻结，不能修改测试 target 绕过门禁；尚未在正式资源执行或验收。
 
-## 2. WAF 与长期凭证：未执行的生产阻塞
+## 2. 长期凭证：未执行的生产阻塞（WAF 已按极简模式接受不做）
 
-`cloudflare/waf-policy.template.json` 是 zone rate-limit 草案，尚未向 Cloudflare 提交，也未证明当前账户套餐支持其 period/mitigation 参数。替换审批域名并按套餐验证后，使用已发现的 `cf rulesets create` / `cf schema rulesets create` 检查请求。**不得把模板文件视为 WAF 验收通过**。
+`cloudflare/waf-policy.template.json` 是 zone rate-limit 草案（**极简模式下不要求上线**），也未证明当前账户套餐支持其 period/mitigation 参数。若将来面向更广用户需要启用，替换审批域名并按套餐验证后，使用 `cf rulesets create` / `cf schema rulesets create` 检查请求。**不得把模板文件视为 WAF 验收通过**。
 
 - 登录与 presign 路径有独立 burst guard；不要对服务 Agent API、视频 Range 或 S3 PUT 施加 JS challenge。
-- 现有内存登录限制仍是单实例 best effort，不是全局分布式保证。是否允许两人低频使用的简化方案，需要用户明确接受，不由其他草案自动取消验收门禁。
+- 现有内存登录限制是单实例 best effort，不是全局分布式保证。**用户已于 2026-10-11 明确接受极简方案**（两人低频使用、内存限流 + 6 位家庭密码）：不再要求上线 WAF/分布式限流，此残留风险按“已接受项”记录、不再作为切换门禁。如后续面向更广用户，应重新评估。
 - 正式 R2 凭证仅授权新生产 bucket，最好进一步限制 `uploads/`。不得复用源复制凭证或测试 bucket 凭证。
 - 生产工厂只声明 ACCESS_KEY/SECRET，不声明临时 SESSION_TOKEN。长期凭证尚未签发、安装或验收，不能宣称已解决。
 - 密码、会话 secret、Agent token、upload secret、operations token 分别生成，不同环境不复用。保存在独立 secret manager；Git/浏览器资源/日志均不存值。

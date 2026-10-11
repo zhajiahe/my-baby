@@ -82,7 +82,7 @@ npm run test:cloudflare
 
 ## 正式冻结 / 备份 / 切换 / 回滚（必须先明确批准）
 
-1. 完成媒体与全 UI/浏览器矩阵、家庭 auth/WAF 分布式限流、签名直传大小/失败/孤儿对象回收、性能/费用/日志隐私审查；配置长期 R2 凭据与生产 secret rotation。解决 vinext 兼容性风险及未验收转换路径。
+1. 完成媒体与全 UI/浏览器矩阵、签名直传大小/失败/孤儿对象回收、性能/费用/日志隐私审查；配置长期 R2 凭据与生产 secret rotation。家庭 auth 的 WAF/分布式限流已按极简模式明确接受为不做（内存限流 + 6 位密码，残留风险见 `SECURITY_CREDENTIALS_PLAN.md`）。解决 vinext 兼容性风险及未验收转换路径。
 2. 创建明确批准的新正式 Worker/D1/私有 R2；单独配置正式域名，但此时不修改 DNS 流量。审查 Actor grants、API token、writesEnabled；先保持 Agent 写关闭。
 3. 维护窗口冻结旧 Web 业务写入及未来 Agent 写入，保留旧站只读；微信 Stage A 桥接继续运行，不重绑、不清 cursor/outbox/DO 存储。
 4. 做 Neon 可恢复备份（完整 schema/data/角色/扩展 + PITR 记录），旧 R2 清单与保留策略、Vercel commit/config/env 备份；真实演练恢复。最终只读一致性快照必须在冻结后导出。
@@ -99,4 +99,4 @@ npm run test:cloudflare
 
 ## 仍然阻塞生产验收
 
-完整媒体格式/跨浏览器矩阵与可选 WASM；全 UI 交互及无暂停升级/恢复；分布式登录防护与长期凭据；迁移最终冻结窗口、恢复演练、正式资源/域名切换批准。既有微信 24/72h 观察不因本轮开发自动通过。默认测试分支推送可能触发 Vercel Preview，其 vinext 输出并非 Vercel Next.js 产物；生产 main 未修改，应保持旧部署回滚基线。
+完整媒体格式/跨浏览器矩阵与可选 WASM；全 UI 交互及无暂停升级/恢复；长期凭据；迁移最终冻结窗口、恢复演练、正式资源/域名切换批准。既有微信 24/72h 观察不因本轮开发自动通过。默认测试分支推送可能触发 Vercel Preview，其 vinext 输出并非 Vercel Next.js 产物；生产 main 未修改，应保持旧部署回滚基线。

@@ -18,20 +18,20 @@
 |---|---|---|
 | 登录限流 `src/lib/auth.ts:loginAllowed` | 内存 Map：单 IP 5次/15min，全局 30次/min，`>5000` key 时清理 | Worker 多 isolate 各自计数，可被轮换 IP / 并发实例绕过。注释自己写了“不是分布式保证” |
 | 会话 `createSession/validSession` | HMAC(password+secret)，payload `{v,exp,nonce}`，7天，HttpOnly+SameSite Strict+prod Secure | 无服务端吊销；logout 只清浏览器 Cookie，被盗 Cookie 到期前有效；换密码/secret 全量失效，无灰度 |
-| CSRF `proxy.ts + sameOrigin` | 非 GET/HEAD/OPTIONS 校验 Origin；login/logout 也校验 | 依赖 Origin 头，GET 接口靠 Cookie+`private,no-store`，现状 OK，但无 WAF 兜底 |
+| CSRF `proxy.ts + sameOrigin` | 非 GET/HEAD/OPTIONS 校验 Origin；login/logout 也校验 | 依赖 Origin 头，GET 接口靠 Cookie+`private,no-store`，无 WAF 兜底（极简模式已接受） |
 | R2 签名 `photos/generate-upload-url` | 服务端 S3 presign 600s，ContentType 白名单 7 种，size 上限 1GiB，key `uploads/<uuid>.<ext>`，视频另签 thumb | `ContentLength` 只进 presign 参数，R2/S3 不强制；无服务端完成回调校验；孤儿对象无回收 |
 | R2 凭证 `cloudflare.config.ts` | `R2_ACCESS_KEY_ID/SECRET/SESSION_TOKEN` 全是 secret；测试用 7 天临时凭证 | 正式不能用带 SessionToken 的临时凭证；迁移用（读源+写测试）与运行时（仅 presign）混用同一套 |
 | 私有读 `/api/media/[...key]` | Cookie 鉴权 + Range + `private,no-store` + 非图片视频强制 attachment | 旧生产 R2 公共链接仍存在，关了页面也绕不过（AGENT_V1 已声明） |
 
 ## 2. 方案总览
 
-1. WAF/限流移到边缘（Cloudflare），应用内限流只当兜底。
+1. ~~WAF/限流移到边缘~~（极简模式不做），应用内限流保留为单实例兜底。
 2. R2 凭证拆三套 + 轮换手册，生产去 SessionToken。
 3. 签名直传收紧（有效期、大小、类型二次校验）+ 孤儿回收 Cron。
 4. 会话加固（双 key 灰度 + 服务端吊销表）。
 5. 日志/告警只存 hash，不存密码和完整 IP。
 
-## 3. WAF + 分布式限流（生产必须）
+## 3. WAF + 分布式限流（存档，极简模式不做）
 
 测试 Worker 无正式域名，先在测试域名上验证规则语法，正式域名切流前再绑一次。
 
@@ -92,7 +92,9 @@ CORS：只允许正式 origin `PUT` 到 `uploads/*`，`MaxAge 600`，不要 `*`�
 
 ## 8. 正式切换前检查单
 
-- [ ] WAF 4 条规则在测试域名压测通过，正式域名已复制
+> 极简模式（见开头与 §0）下第 1、3、4 条的加固项不做；下面保留原重方案清单作为存档。
+
+- [ ] ~~WAF 4 条规则在测试域名压测通过，正式域名已复制~~（极简模式不做）
 - [ ] 生产 R2 三套凭证就位，无 SESSION_TOKEN，CORS 无 `*`
 - [ ] presign 120s + complete 校验 + Cron dry-run 两周
 - [ ] 会话双 key + 吊销表 + `__Host-` 上线，旧 Cookie 平滑过期

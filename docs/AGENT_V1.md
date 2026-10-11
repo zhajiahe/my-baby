@@ -88,9 +88,9 @@ payloadHash 同时绑定授权 babyId、用户身份和规范化参数。重复�
 
 `prisma/changes/20261010_agent_operations.sql`
 
-**本轮只运行 prisma generate/validate，没有执行 SQL 或 db:push。** 上线前必须：
+**生产数据库未执行 SQL 或 db:push；后续已在全新临时本地 PostgreSQL 14 中验证追加 SQL 与真实事务，见第 7 节。** 上线前必须:
 1. 备份并确认目标数据库，先在独立测试 PostgreSQL 上执行该 SQL。
-2. 运行真实 Prisma/数据库事务与并发集成测试；当前 store 模拟测试不能替代 PostgreSQL 验证。
+2. 在目标测试环境复核 Prisma/数据库事务与并发行为；本地 PostgreSQL 14 测试已通过，仍不等同于 Neon/连接池及生产环境验收。
 3. 若要统一使用 Prisma migrations，先为现有数据库做 baseline。
 4. 再经确认将追加表变更应用到生产，保持写入开关关闭，联调成功后开启。
 
@@ -135,6 +135,29 @@ npm run secrets:prepare       # 写本地 0600 凭证文件；不上传、不部
 
 ## 6. 下一阶段门槛
 
-仍未完成：微信真实收发与连续运行、真实测试 PostgreSQL 并发事务、业务授权映射配置、媒体访问安全、生产分布式登录限流、Vercel 发布与微信→数据库完整链路。
+已完成微信基础文字收发及临时本地 PostgreSQL 的真实并发事务测试。仍未完成：24/72 小时连续运行、目标 Neon 测试环境/连接池复核、业务授权映射配置、媒体访问安全、生产分布式登录限流、Vercel 发布与微信→数据库完整链路。
 
 本轮完成的是 **B 的本地实现与测试**，不是 B 的生产验收。功能分支推送可能触发 Vercel Preview，取决于仓库集成；不要未经配置把它合并到自动部署的生产 main。
+
+## 7. 真实本地 PostgreSQL 集成测试（2026-10-11）
+
+```bash
+npm run test:postgres
+```
+
+运行器 `scripts/agent-postgres-test.ts` 找到本地 PostgreSQL 工具（当前为 Homebrew PostgreSQL 14.18），以 0700 临时目录、随机端口、新账号/随机密码启动独立实例，仅监听 `127.0.0.1`。**不读取应用 DATABASE_URL 作为测试目标、不启动已有服务、不访问 Neon、不修改 .env**。可用 `MYBABY_TEST_PG_BIN` 指定本机工具目录，不提供外部数据库 URL 参数。
+
+从当前 schema 去除 AgentOperation 后生成基线 SQL，应用到空数据库，再执行仓库审查用追加 SQL；Prisma schema diff 确认两者与完整 schema 一致。随后加入测试专用 guard 表。集成测试显式使用独立 URL，在任何清理/写入前校验 loopback、随机端口、测试账号/库名、实际 data_directory 与随机 guard；直接用应用环境运行测试文件会拒绝连接。
+
+10 个实际数据库用例通过：
+- 追加表与复合唯一键；新 Prisma 客户端读取已提交回执，重复请求不再写入。
+- 参数改变的 409、独立 operationKey 分别写入。
+- 同参数、改参数、跨工具的确定性并发竞争：barrier 保证双方事务都已执行 mutation，再争用回执；败方业务写入回滚，最终只留下一个回执和一个业务记录。
+- PostgreSQL trigger 实际拒绝回执 INSERT，成长/里程碑 mutation 均回滚；移除故障后可正常重试。
+- 撤回/重映射授权不泄露旧结果、不写入另一宝宝。
+- 按宝宝和 UTC 日期范围读取、限量排序、私密备注不返回。
+- Cookie 不授权 Agent；写入关闭/陌生人请求不改变数据库。
+
+成功后 pg_ctl 停止专属临时实例并删除数据；失败保留 0700 私有诊断目录，输出不含连接 URL、密码或 guard。SIGINT/SIGTERM 尝试停止子命令并清理自己启动的实例，不操作 Homebrew 常驻服务。此次运行实际确认 **10/10 通过、实例停止、数据删除**；根单元测试 9/9、`tsc --noEmit` 通过；显式覆盖为无效合成数据库 URL 的 Next.js 生产构建通过；直接运行集成测试文件（未由临时库运行器提供 guard）已实际确认在客户端构造前拒绝。
+
+这验证真实 PostgreSQL 事务，不表示已应用生产 SQL、配置真实业务授权、完成 Neon 连接池联调或上线 Agent。

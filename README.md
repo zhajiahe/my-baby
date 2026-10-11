@@ -86,9 +86,9 @@ npm run dev
 
 📖 **详细开发和部署指南请参考 [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)**
 
-📋 **微信 ClawBot：[Cloudflare 实施计划](./docs/WEIXIN_CLAWBOT_PLAN.md) · [Worker 操作指南](./weixin/README.md) · [核验记录](./docs/WEIXIN_CLAWBOT_VALIDATION.md)**（阶段 A 基础设施已部署，微信扫码与收发验收待完成）
+📋 **微信 ClawBot：[Cloudflare 实施计划](./docs/WEIXIN_CLAWBOT_PLAN.md) · [Worker 操作指南](./weixin/README.md) · [核验记录](./docs/WEIXIN_CLAWBOT_VALIDATION.md)**（阶段 A 扫码与真实文字收发、人工切换后的恢复已通过；24/72 小时观测仍待完成）
 
-🔐 **[家庭密码登录与 Agent API](./docs/AGENT_V1.md)**：阶段 B 本地实现已完成，未部署；原页面/API 需要服务端密码与会话 Secret，未配置时拒绝访问。
+🔐 **[家庭密码登录与 Agent API](./docs/AGENT_V1.md)**：阶段 B 本地实现及临时 PostgreSQL 真实事务/并发测试已通过，未上线；原页面/API 需要服务端密码与会话 Secret，未配置时拒绝访问。可用 `npm run test:postgres` 创建全新 loopback 临时库运行集成测试，不使用现有 Neon 或应用 DATABASE_URL。
 
 ## 📝 可用脚本
 

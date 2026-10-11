@@ -9,6 +9,7 @@
     "lint": "next lint",
     "test:unit": "tsx --test tests/*.test.ts",
     "test:auth": "tsx scripts/web-auth-smoke.ts",
+    "test:postgres": "tsx scripts/agent-postgres-test.ts",
     "auth:setup": "tsx scripts/setup-auth.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",

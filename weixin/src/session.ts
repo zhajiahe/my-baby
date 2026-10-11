@@ -121,7 +121,10 @@ export class WeixinSession {
     const c = this.config();
     const counts = Object.fromEntries(Array.from(this.ctx.storage.sql.exec<{ state: string; count: number }>(
       'SELECT state, COUNT(*) AS count FROM events GROUP BY state')).map(row => [row.state, row.count]));
-    return json({ adapterVersion: '0.1.3', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
+    // Bumped whenever observable bridge behaviour changes so a status read can
+    // prove which build the live Durable Object actually runs. 0.1.4 adds the
+    // per-type reception reasons (voice_message/image_message/unsupported_*).
+    return json({ adapterVersion: '0.1.4', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
       lastPollAt: c?.lastPollAt ?? null, lastError: c?.lastError ?? null,
       failures: c?.failures ?? 0, cursorSaved: Boolean(c?.cursor),
       nextAlarmAt: await this.ctx.storage.getAlarm(), events: counts,

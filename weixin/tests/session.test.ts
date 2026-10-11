@@ -116,6 +116,17 @@ test('unauthorized senders and bot messages never enqueue; admin endpoints are p
   assert.deepEqual((await (await h.call('status')).json() as { reception: unknown }).reception, JSON.parse(result).reception);
 });
 
+test('authorized text with an unusable ID does not advance the cursor', async t => {
+  const h = harness(); t.after(() => h.close()); await h.bind();
+  mockUpdates(t, { ret: 0, msgs: [{ ...inbound, message_id: 'not-a-decimal-id' }], get_updates_buf: 'must-not-ack' });
+  await h.session.alarm();
+  const state = await (await h.call('status')).json() as { state: string; cursorSaved: boolean; lastError: string };
+  assert.equal(state.state, 'backoff');
+  assert.equal(state.cursorSaved, false);
+  assert.equal(state.lastError, 'invalid_message_id');
+  assert.equal(h.queued.length, 0);
+});
+
 test('expired credentials stop alarms; transient HTTP failure backs off', async t => {
   const h = harness(); t.after(() => h.close()); await h.bind();
   const mock = t.mock.method(globalThis, 'fetch', async () => new Response('', { status: 503 }));
@@ -124,6 +135,24 @@ test('expired credentials stop alarms; transient HTTP failure backs off', async 
   mock.mock.mockImplementation(async () => Response.json({ ret: -14 }));
   await h.session.alarm(); assert.equal(h.alarmAt, null);
   assert.equal((await (await h.call('status')).json() as { state: string }).state, 'auth_expired');
+});
+
+test('observation counters survive restart and retain failures after recovery', async t => {
+  const h = harness(); t.after(() => h.close()); await h.bind();
+  const mock = t.mock.method(globalThis, 'fetch', async () => Response.json({ ret: 0, msgs: [] }));
+  await h.session.alarm();
+  mock.mock.mockImplementation(async () => new Response('', { status: 503 }));
+  await h.session.alarm();
+  h.restart();
+  mock.mock.mockImplementation(async () => Response.json({ ret: 0, msgs: [] }));
+  await h.session.alarm();
+  const state = await (await h.call('status')).json() as { observation: {
+    completedPolls: number; failedCycles: number; lastFailureCategory: string; maxSuccessGapMs: number;
+  } };
+  assert.equal(state.observation.completedPolls, 2);
+  assert.equal(state.observation.failedCycles, 1);
+  assert.equal(state.observation.lastFailureCategory, 'http_503');
+  assert.ok(state.observation.maxSuccessGapMs >= 0);
 });
 
 test('pause while polling prevents stale response persistence and rearming', async t => {

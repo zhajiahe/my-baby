@@ -1,5 +1,11 @@
 // Independently implemented against Tencent/openclaw-weixin protocol at
 // c6643f6f0ac03574eb126f2d69569ea4267cc3c6 (channel version 2.4.10).
+import JSONBig from 'json-bigint';
+
+// Parse the wire text before JS can round uint64 IDs. Never attempt to repair
+// an already rounded Number: two distinct messages could share a dedup key.
+const wireJSON = JSONBig({ storeAsString: true, strict: true, protoAction: 'error', constructorAction: 'error' });
+
 export const API_BASE = 'https://ilinkai.weixin.qq.com';
 export const CHANNEL_VERSION = '2.4.10';
 const CLIENT_VERSION = String((2 << 16) | (4 << 8) | 10);
@@ -63,7 +69,11 @@ export async function ilinkRequest(base: string, path: string, options: {
   body?: unknown; token?: string; timeoutMs?: number; signal?: AbortSignal;
 } = {}): Promise<Record<string, unknown>> {
   const post = options.body !== undefined;
-  const timeout = AbortSignal.timeout(options.timeoutMs ?? 15_000);
+  // A native timeout signal cannot be cancelled after a successful fetch.
+  // Clear our timer explicitly so completed requests leave no pending timers.
+  const timeoutController = new AbortController();
+  const timer = setTimeout(() => timeoutController.abort(), options.timeoutMs ?? 15_000);
+  const timeout = timeoutController.signal;
   const joined = combineSignals(timeout, options.signal);
   try {
     let response: Response;
@@ -82,7 +92,7 @@ export async function ilinkRequest(base: string, path: string, options: {
       throw new ILinkError(`http_${response.status}`, response.status === 429 || response.status >= 500, response.status >= 500);
     }
     let data: unknown;
-    try { data = await response.json(); } catch { throw new ILinkError('invalid_json', true, true); }
+    try { data = wireJSON.parse(await response.text()); } catch { throw new ILinkError('invalid_json', true, true); }
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ILinkError('invalid_response', true, true);
     const result = data as Record<string, unknown>;
     if (result.ret === -14 || result.errcode === -14) throw new ILinkError('auth_expired', false);
@@ -90,7 +100,7 @@ export async function ilinkRequest(base: string, path: string, options: {
       if (code !== undefined && code !== 0) throw new ILinkError('protocol_rejected', false);
     }
     return result;
-  } finally { joined.dispose(); }
+  } finally { joined.dispose(); clearTimeout(timer); }
 }
 
 const baseInfo = () => ({ channel_version: CHANNEL_VERSION, bot_agent: 'MyBaby/0.1.0' });

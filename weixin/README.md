@@ -9,7 +9,9 @@
 - 已部署：`https://mybaby-weixin.zhajiahe1994.workers.dev`。
 - 已创建 SQLite DO、`mybaby-inbox`、`mybaby-inbox-dlq` 与 Queue 消费者。
 - 已验证 `/health` 200、未授权管理接口 401；2026-10-11 北京时间已扫码绑定，generation 1，观察到云端 `running`、游标保存且最近轮询无错误。
-- 用户发送“桥接测试 001”后尚未收到回复，文字收发/Queue 消费验收仍未通过；新增接收计数的线上生效及 24/72 小时观测仍待确认。详见[核验记录](../docs/WEIXIN_CLAWBOT_VALIDATION.md#7-扫码接入进展2026-10-11北京时间)。
+- 修正消息 ID 的无损 JSON 解析后，用户确认“桥接测试 003”和重部署恢复后的新消息均收到回复；SQLite 中已有 4 条 `done`，没有未完成/失败/未知发送记录。
+- 当前运行版本 `0.1.3`。人工暂停、等待旧实例退出、部署和恢复后，绑定/游标/完成记录保留；不停轮询时的自动热升级仍未通过验证。
+- 持久化观测已开始，当前约 1 小时、196 次成功轮询、0 次失败；24/72 小时稳定性、10 条编号测试和费用监控仍待完成。详见[最新核验记录](../docs/WEIXIN_CLAWBOT_VALIDATION.md#8-文字收发与人工切换恢复2026-10-11)。
 - 详见 [协议核验与验收记录](../docs/WEIXIN_CLAWBOT_VALIDATION.md) 和 [整体实施计划](../docs/WEIXIN_CLAWBOT_PLAN.md)。
 
 ## 开发与检查
@@ -43,7 +45,7 @@ npm run session -- status
 
 本地 `.local/client.json`、`.local/secrets.json`、`.local/binding.json` 均以 0600 保存且被 git 忽略。**请勿读取/粘贴这些内容到聊天或日志**；保管本机及备份权限。如果本地管理 token 丢失，需要安全轮换云端 Secret，不能从 Cloudflare 取回原值。
 
-## 微信扫码与第一次启动（下一步）
+## 微信扫码与第一次启动（本机已完成）
 
 在本机终端运行，保持终端前台以便输入手机显示的验证码：
 
@@ -54,7 +56,9 @@ npm run login
 
 扫码脚本显示终端二维码；支持验证码、二维码过期刷新与可信 iLink 域名重定向。二维码是临时授权信息，不要分享或截图上传。登录成功只保存凭证，不自动启动云端轮询。
 
-首次绑定时执行：
+**部署边界**：当前工作树含阶段 B 代码。下面的完整构建/部署命令会上传该代码，即使默认 `AGENT_MODE=bridge`。当前线上仍是独立构建的 A 基线加协议/观测补丁；在阶段 B 部署获批准前，不要直接上传当前工作树或 `npm run check` 生成的 `.cloudflare/output`。
+
+以后批准部署完整工作树时，首次绑定执行：
 
 ```bash
 npm run secrets:prepare      # 当前代码新增了 B 的 Secret；读取本地 .env，不输出/上传 key
@@ -74,7 +78,7 @@ npm run session -- status
 当前尚未接入 AI 或成长记录写入。
 ```
 
-只有扫码用户 ID 在允许列表中。陌生用户、Bot 自身消息、群聊、未完成消息、不支持的媒体、缺上下文或不安全的数字 ID 不会入队。权限控制在接收层和回复层重复检查。
+只有扫码用户 ID 在允许列表中。陌生用户、Bot 自身消息、群聊、流式未完成消息、不支持的媒体或缺上下文的消息不会入队。入站 NEW (0)、FINISH (2) 或省略状态的文本可接收；JSON 原文中的大整数 ID 无损保存为十进制字符串，不能用已舍入的 Number 去重。已授权消息遇到无法安全规范化的 ID 时不推进游标，进入退避以便恢复。权限控制在接收层和回复层重复检查。
 
 ## 重新扫码、暂停和部署
 
@@ -91,6 +95,18 @@ npm run session -- start
 
 暂停会取消本实例中的轮询，并防止旧响应推进游标；已经发到微信的回复无法撤回。暂停期间 Queue 仍可能投递，重试耗尽会进入 DLQ。当前 DLQ 无消费者，阶段 C 再完善人工重放与告警。
 
+### 部署后的运行实例核对
+
+`cf deploy` 完成只表示控制面接受部署，不保证活跃 DO 已加载新代码。本轮不停轮询时仍观察到旧 `adapterVersion`；短暂停止并等待旧请求退出后才确认新版本生效。因此暂不承诺无人工介入的热升级。
+
+维护时先检查未完成事件，暂停轮询，等待旧请求退出，再核对 `session -- status` 的版本、generation、游标与完成计数；确认目标版本后恢复。不要为了升级重新绑定、清空游标或删除 SQLite 数据。暂停期间可能有 Queue 重试，存在未完成任务时须先做对账。
+
+### 24 小时观测
+
+`npm run session -- status` 返回受保护的 `observation`：起始时间、成功提交的轮询数、失败周期数、最近成功时间、最大成功间隔、最近失败时间/分类。数据在 DO 中持久化，失败数不会因随后成功或对象重建而清零；一个周期可成功保存游标后又因 Queue 失败而记失败。
+
+当前窗口起点 `2026-10-11T00:10:38.617Z`（北京时间 08:10:38）。最早在北京时间 **2026-10-12 08:10:38** 后复核；实际还须结合失败/间隔、Queue/DLQ、编号文本和账单，不以单次 `running` 状态宣称 24 小时稳定。无需本机常驻轮询程序；后续定时告警尚未实现。
+
 ## 管理 API
 
 管理请求均需 `Authorization: Bearer <WEIXIN_ADMIN_TOKEN>`；至少 32 字符。CLI 从受保护本地文件读取，避免手工将 token 放入 shell 历史。
@@ -98,7 +114,7 @@ npm run session -- start
 | 路径 | 方法 | 功能 |
 | --- | --- | --- |
 | `/health` | GET | 公共存活检查；不报告微信连接成功 |
-| `/admin/session/status` | GET | 脱敏状态、最近轮询、Alarm 与事件状态计数 |
+| `/admin/session/status` | GET | 运行版本、脱敏状态、最近轮询、Alarm、事件/接收计数与持久化观测 |
 | `/admin/session/bind` | POST | botId、apiBaseUrl、allowedUserIds；可显式 discardPending |
 | `/admin/session/start` | POST | 设置下一轮 Alarm |
 | `/admin/session/pause` | POST | 暂停并删除 Alarm |

@@ -112,11 +112,28 @@ export class WeixinSession {
     const c = this.config();
     const counts = Object.fromEntries(Array.from(this.ctx.storage.sql.exec<{ state: string; count: number }>(
       'SELECT state, COUNT(*) AS count FROM events GROUP BY state')).map(row => [row.state, row.count]));
-    return json({ adapterVersion: '0.1.1', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
+    return json({ adapterVersion: '0.1.3', state: c?.state ?? 'unbound', generation: c?.generation ?? 0,
       lastPollAt: c?.lastPollAt ?? null, lastError: c?.lastError ?? null,
       failures: c?.failures ?? 0, cursorSaved: Boolean(c?.cursor),
       nextAlarmAt: await this.ctx.storage.getAlarm(), events: counts,
-      reception: this.ctx.storage.kv.get('reception') ?? { received: 0, accepted: 0, rejected: {} } });
+      reception: this.ctx.storage.kv.get('reception') ?? { received: 0, accepted: 0, rejected: {} },
+      observation: this.ctx.storage.kv.get('observation') ?? null });
+  }
+
+  private observe(success: boolean, category?: string): void {
+    const now = Date.now();
+    const metrics = this.ctx.storage.kv.get<{ startedAt: number; completedPolls: number; failedCycles: number;
+      lastSuccessAt: number | null; maxSuccessGapMs: number; lastFailureAt: number | null; lastFailureCategory: string | null }>('observation')
+      ?? { startedAt: now, completedPolls: 0, failedCycles: 0, lastSuccessAt: null, maxSuccessGapMs: 0,
+        lastFailureAt: null, lastFailureCategory: null };
+    if (success) {
+      metrics.completedPolls++;
+      if (metrics.lastSuccessAt !== null) metrics.maxSuccessGapMs = Math.max(metrics.maxSuccessGapMs, now - metrics.lastSuccessAt);
+      metrics.lastSuccessAt = now;
+    } else {
+      metrics.failedCycles++; metrics.lastFailureAt = now; metrics.lastFailureCategory = category ?? 'internal_or_queue';
+    }
+    this.ctx.storage.kv.put('observation', metrics);
   }
 
   private async flush(generation: number): Promise<void> {
@@ -151,7 +168,16 @@ export class WeixinSession {
       for (const raw of result.msgs) {
         reception.received++;
         const reason = incomingTextRejection(raw, c.botId, c.allowedUserIds);
-        if (reason) { reception.rejected[reason] = (reception.rejected[reason] ?? 0) + 1; continue; }
+        if (reason) {
+          reception.rejected[reason] = (reception.rejected[reason] ?? 0) + 1;
+          // An otherwise authorized text with an unusable ID must not be
+          // acknowledged by advancing the cursor: retain it for recovery.
+          if (reason === 'invalid_message_id') {
+            this.ctx.storage.kv.put('reception', reception);
+            throw new ILinkError('invalid_message_id', true);
+          }
+          continue;
+        }
         reception.accepted++;
         const m = incomingText(raw, c.botId, c.allowedUserIds);
         if (m) messages.push({ ...m, id: await eventId(c.botId, m.messageId) });
@@ -160,6 +186,7 @@ export class WeixinSession {
       if (!live || controller.signal.aborted) return; // Pause/rebind invalidates in-flight response.
       this.ctx.storage.transactionSync(() => {
         this.ctx.storage.kv.put('reception', reception);
+        this.observe(true);
         for (const m of messages) {
           this.ctx.storage.sql.exec(`INSERT OR IGNORE INTO events
             (id,generation,user_id,text,context_token,received_at,message_id) VALUES (?,?,?,?,?,?,?)`,
@@ -178,6 +205,7 @@ export class WeixinSession {
       if (!live || controller.signal.aborted) return;
       const category = error instanceof ILinkError ? error.category : 'internal_or_queue';
       live.lastError = category; live.failures++;
+      this.observe(false, category);
       if (category === 'auth_expired' || category === 'protocol_rejected') {
         live.state = 'auth_expired'; this.save(live); await this.ctx.storage.deleteAlarm();
       } else {

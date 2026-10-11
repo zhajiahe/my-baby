@@ -47,6 +47,16 @@ test('portable signal composition does not require AbortSignal.any', async t => 
   await getUpdates('https://ilinkai.weixin.qq.com', 'synthetic-token', '', 1000, external.signal);
 });
 
+test('request timeout timers are cleared after success and failure', async t => {
+  const cleared = t.mock.method(globalThis, 'clearTimeout');
+  const mock = t.mock.method(globalThis, 'fetch', async () => Response.json({ ret: 0, msgs: [] }));
+  await getUpdates('https://ilinkai.weixin.qq.com', 'synthetic', '', 1000);
+  assert.equal(cleared.mock.callCount(), 1);
+  mock.mock.mockImplementation(async () => new Response('', { status: 503 }));
+  await assert.rejects(getUpdates('https://ilinkai.weixin.qq.com', 'synthetic', '', 1000));
+  assert.equal(cleared.mock.callCount(), 2);
+});
+
 test('external cancellation remains classified as cancelled', async t => {
   const external = new AbortController();
   t.mock.method(globalThis, 'fetch', (_url: string, options: RequestInit) => new Promise<Response>((_resolve, reject) => {
@@ -106,6 +116,26 @@ test('getUpdates and sendText use actual wire fields and no credential redirects
   assert.equal(send.msg.client_id, 'client-stable');
   assert.equal(send.msg.item_list[0].text_item.text, 'reply');
   assert.equal(send.base_info.bot_agent, 'MyBaby/0.1.0');
+});
+
+test('uint64 message IDs remain distinct through wire parsing and dedup keys', async t => {
+  const ids = ['18446744073709551614', '18446744073709551615'];
+  const frames = ids.map(id => JSON.stringify(message).replace('"message_id":123', `"message_id":${id}`));
+  t.mock.method(globalThis, 'fetch', async () => new Response(`{"ret":0,"msgs":[${frames.join(',')}],"get_updates_buf":"next","longpolling_timeout_ms":35000}`));
+  const result = await getUpdates('https://ilinkai.weixin.qq.com', 'synthetic', '', 1000);
+  const normalized = result.msgs.map(raw => incomingText(raw, 'bot', ['allowed']));
+  assert.deepEqual(normalized.map(m => m?.messageId), ids);
+  assert.equal(result.timeoutMs, 40000);
+  assert.notEqual(await eventId('bot', normalized[0]!.messageId), await eventId('bot', normalized[1]!.messageId));
+});
+
+test('wire parser rejects prototype keys and duplicate keys without leaking response data', async t => {
+  const mock = t.mock.method(globalThis, 'fetch', async () => new Response('{"ret":0,"__proto__":{"secret":"do-not-log"}}'));
+  for (const raw of ['{"ret":0,"__proto__":{"secret":"do-not-log"}}', '{"ret":0,"constructor":{"secret":"do-not-log"}}', '{"ret":0,"ret":-14}']) {
+    mock.mock.mockImplementation(async () => new Response(raw));
+    await assert.rejects(getUpdates('https://ilinkai.weixin.qq.com', 'synthetic', '', 1000),
+      (e: unknown) => e instanceof ILinkError && e.category === 'invalid_json' && !e.message.includes('do-not-log'));
+  }
 });
 
 test('protocol errors are classified without echoing response secrets', async t => {
